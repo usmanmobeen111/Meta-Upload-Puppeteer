@@ -1,0 +1,28 @@
+{
+  "name": "meta-reels-automation",
+  "version": "1.0.0",
+  "description": "Automated Meta Reels uploader using AdsPower profiles and Puppeteer",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"No tests configured\" && exit 0"
+  },
+  "keywords": [
+    "meta",
+    "facebook",
+    "reels",
+    "automation",
+    "puppeteer",
+    "adspower",
+    "electron"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.7",
+    "electron": "^28.2.0",
+    "puppeteer": "^21.11.0",
+    "puppeteer-core": "^21.11.0"
+  },
+  "devDependencies": {}
+}

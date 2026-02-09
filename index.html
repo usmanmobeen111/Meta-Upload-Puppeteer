@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meta Reels Automation</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <h1>📱 Meta Reels Automation</h1>
+      <p>Upload videos to Meta Business Suite using AdsPower profiles</p>
+    </header>
+
+    <!-- Configuration Section -->
+    <section class="config-section">
+      <h2>⚙️ Configuration</h2>
+      <div class="config-grid">
+        <div class="config-item">
+          <label for="apiKey">AdsPower API Key:</label>
+          <input type="text" id="apiKey" placeholder="Enter API key">
+        </div>
+        <div class="config-item">
+          <label for="profileId">Profile ID:</label>
+          <input type="text" id="profileId" placeholder="Enter profile ID">
+        </div>
+        <div class="config-item">
+          <label>
+            <input type="checkbox" id="debugMode">
+            Debug Mode (captures screenshots & DOM at each step)
+          </label>
+        </div>
+        <div class="config-item">
+          <button id="saveConfig" class="btn btn-primary">Save Config</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Folder Selection -->
+    <section class="folder-section">
+      <h2>📁 Root Folder</h2>
+      <div class="folder-controls">
+        <button id="selectFolder" class="btn btn-primary">Select Root Folder</button>
+        <span id="selectedFolder" class="folder-path">No folder selected</span>
+      </div>
+    </section>
+
+    <!-- Bulk Controls -->
+    <section class="controls-section">
+      <div class="bulk-controls">
+        <button id="postAll" class="btn btn-success">Post All Unposted</button>
+        <button id="refresh" class="btn btn-secondary">Refresh</button>
+        <button id="stop" class="btn btn-danger">Stop Current Process</button>
+      </div>
+    </section>
+
+    <!-- Video Table -->
+    <section class="table-section">
+      <h2>🎬 Videos</h2>
+      <div class="table-container">
+        <table id="videoTable">
+          <thead>
+            <tr>
+              <th>Folder Name</th>
+              <th>Video File</th>
+              <th>Caption Preview</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="videoTableBody">
+            <tr>
+              <td colspan="5" class="empty-state">No videos found. Select a root folder to get started.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Status Display -->
+    <section class="status-section">
+      <h2>📊 Status</h2>
+      <div class="status-grid">
+        <div class="status-item">
+          <strong>Current Action:</strong>
+          <span id="currentAction">Idle</span>
+        </div>
+        <div class="status-item">
+          <strong>Current Folder:</strong>
+          <span id="currentFolder">-</span>
+        </div>
+        <div class="status-item">
+          <strong>Random Delay:</strong>
+          <span id="randomDelay">-</span>
+        </div>
+      </div>
+      
+      <!-- Logs Console -->
+      <div class="logs-container">
+        <h3>Console Logs</h3>
+        <div id="logsConsole" class="logs-output"></div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <p>Built with Electron + Puppeteer + AdsPower</p>
+    </footer>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
