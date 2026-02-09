@@ -476,22 +476,26 @@ class MetaReelsUploader {
                 return null;
             });
 
-            // Method 1: Try to find the exact Share button using role and text
-            logger.log('[SHARE] Method 1: Searching for button with role="button" containing "Share"...');
+            // Find and click button containing "Share" text
+            logger.log('[SHARE] Searching for button containing "Share" text...');
             const shareClicked = await this.page.evaluate(() => {
                 // Find all elements with role="button"
                 const buttons = Array.from(document.querySelectorAll('[role="button"]'));
 
-                // Find the one that contains "Share" text
+                // Find the one that contains "Share" text anywhere in its descendants
                 const shareButton = buttons.find(btn => {
-                    const text = btn.innerText || btn.textContent;
-                    return text && text.trim().toLowerCase() === 'share';
+                    // Check if this button or any of its descendants contains "Share" text
+                    const allText = btn.textContent || btn.innerText || '';
+                    return allText.trim().toLowerCase() === 'share';
                 });
 
                 if (shareButton) {
+                    console.log('[SHARE DEBUG] Found Share button:', shareButton.outerHTML.substring(0, 200));
                     shareButton.click();
                     return true;
                 }
+
+                console.log('[SHARE DEBUG] Share button not found');
                 return false;
             });
 
@@ -508,7 +512,7 @@ class MetaReelsUploader {
                     }
                 }
             } else {
-                logger.success('[SHARE] Share button clicked via Method 1');
+                logger.success('[SHARE] Share button clicked successfully');
             }
 
             // Wait for page to redirect
