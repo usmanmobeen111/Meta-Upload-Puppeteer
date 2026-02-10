@@ -463,161 +463,234 @@ class MetaReelsUploader {
      * Click Share/Publish button with enhanced reliability
      * Handles nested div structures where Share is a div with role="button"
      */
+    // async clickShareButton() {
+    //     try {
+    //         logger.log('[SHARE] Clicking Share/Publish button...');
+
+    //         // Wait a moment for button to be ready
+    //         await this.page.waitForTimeout(2000);
+
+    //         // Strategy 1: Find divs with role="button" that contain "Share" text and are not busy
+    //         logger.log('[SHARE] Strategy 1: Finding role="button" divs containing "Share" text...');
+    //         let shareClicked = await this.page.evaluate(() => {
+    //             // Find all elements with role="button"
+    //             const buttons = Array.from(document.querySelectorAll('div[role="button"]'));
+    //             console.log(`[SHARE] Found ${buttons.length} elements with role="button"`);
+
+    //             // Find Share button by checking text content and aria-busy state
+    //             const shareButton = buttons.find(btn => {
+    //                 const ariaBusy = btn.getAttribute('aria-busy');
+    //                 const text = (btn.textContent || '').trim();
+    //                 const tabindex = btn.getAttribute('tabindex');
+
+    //                 // Check if this button contains "Share" and is not busy
+    //                 const hasShareText = text === 'Share' || text.includes('Share');
+    //                 const isNotBusy = ariaBusy === 'false' || ariaBusy === null;
+    //                 const isClickable = tabindex !== null && tabindex !== '-1';
+
+    //                 if (hasShareText) {
+    //                     console.log(`[SHARE] Potential Share button found: text="${text}", aria-busy="${ariaBusy}", tabindex="${tabindex}"`);
+    //                 }
+
+    //                 return hasShareText && isNotBusy && isClickable;
+    //             });
+
+    //             if (shareButton) {
+    //                 console.log('[SHARE] Found Share button via role="button" and text match');
+    //                 shareButton.click();
+    //                 return true;
+    //             }
+
+    //             return false;
+    //         });
+
+    //         if (shareClicked) {
+    //             logger.success('[SHARE] ✅ Share button clicked (Strategy 1: role="button" + text)');
+    //         } else {
+    //             // Strategy 2: Use XPath to find button containing Share text
+    //             logger.log('[SHARE] Strategy 2: Using XPath to find Share button...');
+    //             try {
+    //                 const [shareButton] = await this.page.$x("//div[@role='button' and .//div[text()='Share']]");
+    //                 if (shareButton) {
+    //                     await shareButton.click();
+    //                     shareClicked = true;
+    //                     logger.success('[SHARE] ✅ Share button clicked (Strategy 2: XPath)');
+    //                 }
+    //             } catch (xpathError) {
+    //                 logger.warn(`[SHARE] XPath strategy failed: ${xpathError.message}`);
+    //             }
+
+    //             if (!shareClicked) {
+    //                 // Strategy 3: Find all role="button" or button elements and check text
+    //                 logger.log('[SHARE] Strategy 3: Finding any button with "Share" text...');
+    //                 shareClicked = await this.page.evaluate(() => {
+    //                     const buttons = Array.from(document.querySelectorAll('[role="button"], button'));
+
+    //                     // Find the one that contains "Share" text
+    //                     const shareButton = buttons.find(btn => {
+    //                         const text = (btn.textContent || btn.innerText || '').toLowerCase();
+    //                         return text.includes('share');
+    //                     });
+
+    //                     if (shareButton) {
+    //                         console.log('[SHARE] Found Share button (contains match)');
+    //                         shareButton.click();
+    //                         return true;
+    //                     }
+
+    //                     return false;
+    //                 });
+
+    //                 if (shareClicked) {
+    //                     logger.success('[SHARE] ✅ Share button clicked (Strategy 3: Text contains)');
+    //                 } else {
+    //                     // Strategy 4: Use TreeWalker to find Share text and click parent
+    //                     logger.log('[SHARE] Strategy 4: Using TreeWalker to find Share text node...');
+    //                     shareClicked = await this.page.evaluate(() => {
+    //                         const walker = document.createTreeWalker(
+    //                             document.body,
+    //                             NodeFilter.SHOW_TEXT,
+    //                             null,
+    //                             false
+    //                         );
+
+    //                         let node;
+    //                         while (node = walker.nextNode()) {
+    //                             const text = node.textContent.trim();
+    //                             if (text === 'Share') {
+    //                                 let parent = node.parentElement;
+    //                                 while (parent) {
+    //                                     const role = parent.getAttribute('role');
+    //                                     if (role === 'button' || parent.tagName === 'BUTTON') {
+    //                                         console.log('[SHARE] Found clickable parent via TreeWalker');
+    //                                         parent.click();
+    //                                         return true;
+    //                                     }
+    //                                     parent = parent.parentElement;
+    //                                 }
+    //                             }
+    //                         }
+    //                         return false;
+    //                     });
+
+    //                     if (shareClicked) {
+    //                         logger.success('[SHARE] ✅ Share button clicked (Strategy 4: TreeWalker)');
+    //                     } else {
+    //                         // Strategy 5: Use helper function with all fallbacks
+    //                         logger.log('[SHARE] Strategy 5: Using helper function with retries...');
+    //                         try {
+    //                             await clickButtonByText(this.page, 'Share', this.config.maxRetries);
+    //                             shareClicked = true;
+    //                             logger.success('[SHARE] ✅ Share button clicked (Strategy 5: Helper)');
+    //                         } catch (e1) {
+    //                             // Try "Publish" as final fallback
+    //                             logger.log('[SHARE] Strategy 6: Trying "Publish" as fallback...');
+    //                             try {
+    //                                 await clickButtonByText(this.page, 'Publish', this.config.maxRetries);
+    //                                 shareClicked = true;
+    //                                 logger.success('[SHARE] ✅ Publish button clicked (Strategy 6: Fallback)');
+    //                             } catch (e2) {
+    //                                 throw new Error('Share/Publish button not found after all strategies');
+    //                             }
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+
+    //         // If we reached here without clicking, throw error
+    //         if (!shareClicked) {
+    //             throw new Error('Failed to click Share/Publish button');
+    //         }
+
+    //         // Wait for page response after clicking
+    //         logger.log('[SHARE] Waiting for page response...');
+    //         await this.page.waitForTimeout(3000);
+
+    //         // Check if we're still on the page or redirected
+    //         const currentUrl = this.page.url();
+    //         logger.log(`[SHARE] Current URL: ${currentUrl}`);
+
+    //         logger.success('[SHARE] ✅ Share action completed');
+
+    //     } catch (error) {
+    //         logger.error(`[SHARE] ❌ Failed to click Share button: ${error.message}`);
+    //         throw new Error(`Failed to click Share button: ${error.message}`);
+    //     }
+    // }
+
     async clickShareButton() {
         try {
             logger.log('[SHARE] Clicking Share/Publish button...');
 
-            // Wait a moment for button to be ready
             await this.page.waitForTimeout(2000);
 
-            // Strategy 1: Find divs with role="button" that contain "Share" text and are not busy
-            logger.log('[SHARE] Strategy 1: Finding role="button" divs containing "Share" text...');
-            let shareClicked = await this.page.evaluate(() => {
-                // Find all elements with role="button"
-                const buttons = Array.from(document.querySelectorAll('div[role="button"]'));
-                console.log(`[SHARE] Found ${buttons.length} elements with role="button"`);
+            // Strategy: XPath + real mouse click
+            logger.log('[SHARE] Strategy: XPath search for Share/Publish button...');
 
-                // Find Share button by checking text content and aria-busy state
-                const shareButton = buttons.find(btn => {
-                    const ariaBusy = btn.getAttribute('aria-busy');
-                    const text = (btn.textContent || '').trim();
-                    const tabindex = btn.getAttribute('tabindex');
+            const xpath =
+                "//div[@role='button' and (.//div[contains(text(),'Share')] or .//div[contains(text(),'Publish')])]";
 
-                    // Check if this button contains "Share" and is not busy
-                    const hasShareText = text === 'Share' || text.includes('Share');
-                    const isNotBusy = ariaBusy === 'false' || ariaBusy === null;
-                    const isClickable = tabindex !== null && tabindex !== '-1';
+            const buttons = await this.page.$x(xpath);
 
-                    if (hasShareText) {
-                        console.log(`[SHARE] Potential Share button found: text="${text}", aria-busy="${ariaBusy}", tabindex="${tabindex}"`);
-                    }
-
-                    return hasShareText && isNotBusy && isClickable;
-                });
-
-                if (shareButton) {
-                    console.log('[SHARE] Found Share button via role="button" and text match');
-                    shareButton.click();
-                    return true;
-                }
-
-                return false;
-            });
-
-            if (shareClicked) {
-                logger.success('[SHARE] ✅ Share button clicked (Strategy 1: role="button" + text)');
-            } else {
-                // Strategy 2: Use XPath to find button containing Share text
-                logger.log('[SHARE] Strategy 2: Using XPath to find Share button...');
-                try {
-                    const [shareButton] = await this.page.$x('//div[@role="button" and contains(., "Share")]');
-                    if (shareButton) {
-                        await shareButton.click();
-                        shareClicked = true;
-                        logger.success('[SHARE] ✅ Share button clicked (Strategy 2: XPath)');
-                    }
-                } catch (xpathError) {
-                    logger.warn(`[SHARE] XPath strategy failed: ${xpathError.message}`);
-                }
-
-                if (!shareClicked) {
-                    // Strategy 3: Find all role="button" or button elements and check text
-                    logger.log('[SHARE] Strategy 3: Finding any button with "Share" text...');
-                    shareClicked = await this.page.evaluate(() => {
-                        const buttons = Array.from(document.querySelectorAll('[role="button"], button'));
-
-                        // Find the one that contains "Share" text
-                        const shareButton = buttons.find(btn => {
-                            const text = (btn.textContent || btn.innerText || '').toLowerCase();
-                            return text.includes('share');
-                        });
-
-                        if (shareButton) {
-                            console.log('[SHARE] Found Share button (contains match)');
-                            shareButton.click();
-                            return true;
-                        }
-
-                        return false;
-                    });
-
-                    if (shareClicked) {
-                        logger.success('[SHARE] ✅ Share button clicked (Strategy 3: Text contains)');
-                    } else {
-                        // Strategy 4: Use TreeWalker to find Share text and click parent
-                        logger.log('[SHARE] Strategy 4: Using TreeWalker to find Share text node...');
-                        shareClicked = await this.page.evaluate(() => {
-                            const walker = document.createTreeWalker(
-                                document.body,
-                                NodeFilter.SHOW_TEXT,
-                                null,
-                                false
-                            );
-
-                            let node;
-                            while (node = walker.nextNode()) {
-                                const text = node.textContent.trim();
-                                if (text === 'Share') {
-                                    let parent = node.parentElement;
-                                    while (parent) {
-                                        const role = parent.getAttribute('role');
-                                        if (role === 'button' || parent.tagName === 'BUTTON') {
-                                            console.log('[SHARE] Found clickable parent via TreeWalker');
-                                            parent.click();
-                                            return true;
-                                        }
-                                        parent = parent.parentElement;
-                                    }
-                                }
-                            }
-                            return false;
-                        });
-
-                        if (shareClicked) {
-                            logger.success('[SHARE] ✅ Share button clicked (Strategy 4: TreeWalker)');
-                        } else {
-                            // Strategy 5: Use helper function with all fallbacks
-                            logger.log('[SHARE] Strategy 5: Using helper function with retries...');
-                            try {
-                                await clickButtonByText(this.page, 'Share', this.config.maxRetries);
-                                shareClicked = true;
-                                logger.success('[SHARE] ✅ Share button clicked (Strategy 5: Helper)');
-                            } catch (e1) {
-                                // Try "Publish" as final fallback
-                                logger.log('[SHARE] Strategy 6: Trying "Publish" as fallback...');
-                                try {
-                                    await clickButtonByText(this.page, 'Publish', this.config.maxRetries);
-                                    shareClicked = true;
-                                    logger.success('[SHARE] ✅ Publish button clicked (Strategy 6: Fallback)');
-                                } catch (e2) {
-                                    throw new Error('Share/Publish button not found after all strategies');
-                                }
-                            }
-                        }
-                    }
-                }
+            if (!buttons.length) {
+                throw new Error("Share/Publish button not found using XPath");
             }
 
-            // If we reached here without clicking, throw error
-            if (!shareClicked) {
-                throw new Error('Failed to click Share/Publish button');
+            logger.log(`[SHARE] Found ${buttons.length} Share/Publish candidate button(s)`);
+
+            // Try clicking the first visible one
+            for (let i = 0; i < buttons.length; i++) {
+                const btn = buttons[i];
+
+                await btn.evaluate(el => el.scrollIntoView({ behavior: "smooth", block: "center" }));
+                await this.page.waitForTimeout(800);
+
+                const box = await btn.boundingBox();
+
+                if (!box) {
+                    logger.warn(`[SHARE] Button #${i + 1} has no bounding box (not visible)`);
+                    continue;
+                }
+
+                logger.log(`[SHARE] Clicking Share button #${i + 1} using mouse coordinates...`);
+
+                // Click the button 3 times to ensure it registers
+                for (let clickNum = 1; clickNum <= 3; clickNum++) {
+                    await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+                    await this.page.waitForTimeout(200);
+
+                    await this.page.mouse.down();
+                    await this.page.waitForTimeout(120);
+                    await this.page.mouse.up();
+
+                    logger.log(`[SHARE] Click ${clickNum}/3 completed`);
+
+                    // Small delay between clicks
+                    if (clickNum < 3) {
+                        await this.page.waitForTimeout(500);
+                    }
+                }
+
+                logger.success(`[SHARE] ✅ Share/Publish clicked successfully 3 times (button #${i + 1})`);
+
+                // Wait after clicks
+                await this.page.waitForTimeout(3000);
+
+                logger.log(`[SHARE] Current URL after click: ${this.page.url()}`);
+                logger.success('[SHARE] ✅ Share action completed');
+
+                return;
             }
 
-            // Wait for page response after clicking
-            logger.log('[SHARE] Waiting for page response...');
-            await this.page.waitForTimeout(3000);
-
-            // Check if we're still on the page or redirected
-            const currentUrl = this.page.url();
-            logger.log(`[SHARE] Current URL: ${currentUrl}`);
-
-            logger.success('[SHARE] ✅ Share action completed');
+            throw new Error("Found Share/Publish button but could not click any visible one");
 
         } catch (error) {
             logger.error(`[SHARE] ❌ Failed to click Share button: ${error.message}`);
             throw new Error(`Failed to click Share button: ${error.message}`);
         }
     }
+
 
     /**
      * Wait for posting confirmation
