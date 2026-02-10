@@ -59,15 +59,15 @@ class MetaReelsUploader {
             // Start AdsPower profile
             await this.startBrowser();
 
-            // Execute upload workflow
+            // Execute upload workflow (includes share and confirmation)
             await this.executeWorkflow(folderName, videoPath, caption);
 
-            // Mark as posted
+            // Close browser first
+            await this.closeBrowser();
+
+            // Mark as posted ONLY after successful workflow completion
             markAsPosted(videoData.folderPath, videoFile);
             logger.success(`✅ Successfully posted: ${folderName}`);
-
-            // Close browser
-            await this.closeBrowser();
 
             return true;
         } catch (error) {
@@ -460,70 +460,98 @@ class MetaReelsUploader {
     }
 
     /**
-     * Click Share/Publish button and wait for page redirect
+     * Click Share/Publish button with enhanced reliability
      */
     async clickShareButton() {
         try {
             logger.log('[SHARE] Clicking Share/Publish button...');
 
-            // Set up navigation promise BEFORE clicking
-            const navigationPromise = this.page.waitForNavigation({
-                waitUntil: 'networkidle2',
-                timeout: 30000
-            }).catch(err => {
-                // Navigation might not happen, so log but don't fail
-                logger.warn(`[SHARE] Navigation timeout (may be expected): ${err.message}`);
-                return null;
-            });
+            // Wait a moment for button to be ready
+            await this.page.waitForTimeout(2000);
 
-            // Find and click button containing "Share" text
-            logger.log('[SHARE] Searching for button containing "Share" text...');
-            const shareClicked = await this.page.evaluate(() => {
+            // Strategy 1: Find exact "Share" button using multiple selectors
+            logger.log('[SHARE] Strategy 1: Finding Share button by exact text match...');
+            let shareClicked = await this.page.evaluate(() => {
                 // Find all elements with role="button"
-                const buttons = Array.from(document.querySelectorAll('[role="button"]'));
+                const buttons = Array.from(document.querySelectorAll('[role="button"], button'));
+                
 
-                // Find the one that contains "Share" text anywhere in its descendants
+                // Find the one that contains EXACTLY "Share" text
                 const shareButton = buttons.find(btn => {
-                    // Check if this button or any of its descendants contains "Share" text
-                    const allText = btn.textContent || btn.innerText || '';
-                    return allText.trim().toLowerCase() === 'share';
+                    const text = btn.textContent || btn.innerText || '';
+                    return text.trim().toLowerCase() === 'share';
                 });
 
                 if (shareButton) {
-                    console.log('[SHARE DEBUG] Found Share button:', shareButton.outerHTML.substring(0, 200));
+                    console.log('[SHARE] Found Share button (exact match)');
                     shareButton.click();
                     return true;
                 }
 
-                console.log('[SHARE DEBUG] Share button not found');
                 return false;
             });
 
-            if (!shareClicked) {
-                // Method 2: Fallback to text-based clicking
-                logger.warn('[SHARE] Method 1 failed, trying fallback methods...');
-                try {
-                    await clickButtonByText(this.page, 'Share', this.config.maxRetries);
-                } catch (e1) {
+            if (shareClicked) {
+                logger.success('[SHARE] ✅ Share button clicked (Strategy 1)');
+            } else {
+                // Strategy 2: Find any button containing "Share"
+                logger.log('[SHARE] Strategy 2: Finding button containing "share" text...');
+                shareClicked = await this.page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('[role="button"], button'));
+                    const shareButton = buttons.find(btn => {
+                        const text = (btn.textContent || btn.innerText || '').toLowerCase();
+                        return text.includes('share');
+                    });
+
+                    if (shareButton) {
+                        console.log('[SHARE] Found Share button (contains match)');
+                        shareButton.click();
+                        return true;
+                    }
+
+                    return false;
+                });
+
+                if (shareClicked) {
+                    logger.success('[SHARE] ✅ Share button clicked (Strategy 2)');
+                } else {
+                    // Strategy 3: Use helper function with all fallbacks
+                    logger.log('[SHARE] Strategy 3: Using helper function with retries...');
                     try {
-                        await clickButtonByText(this.page, 'Publish', this.config.maxRetries);
-                    } catch (e2) {
-                        throw new Error('Share/Publish button not found');
+                        await clickButtonByText(this.page, 'Share', this.config.maxRetries);
+                        shareClicked = true;
+                        logger.success('[SHARE] ✅ Share button clicked (Strategy 3)');
+                    } catch (e1) {
+                        // Try "Publish" as final fallback
+                        logger.log('[SHARE] Strategy 4: Trying "Publish" as fallback...');
+                        try {
+                            await clickButtonByText(this.page, 'Publish', this.config.maxRetries);
+                            shareClicked = true;
+                            logger.success('[SHARE] ✅ Publish button clicked (Strategy 4)');
+                        } catch (e2) {
+                            throw new Error('Share/Publish button not found after all strategies');
+                        }
                     }
                 }
-            } else {
-                logger.success('[SHARE] Share button clicked successfully');
             }
 
-            // Wait for page to redirect
-            logger.log('[SHARE] Waiting for page redirect...');
-            await navigationPromise;
+            // If we reached here without clicking, throw error
+            if (!shareClicked) {
+                throw new Error('Failed to click Share/Publish button');
+            }
 
-            // Additional wait to ensure page is fully loaded
-            await this.page.waitForTimeout(2000);
-            logger.success('[SHARE] ✅ Share button clicked, page redirected');
+            // Wait for page response after clicking
+            logger.log('[SHARE] Waiting for page response...');
+            await this.page.waitForTimeout(3000);
+
+            // Check if we're still on the page or redirected
+            const currentUrl = this.page.url();
+            logger.log(`[SHARE] Current URL: ${currentUrl}`);
+
+            logger.success('[SHARE] ✅ Share action completed');
 
         } catch (error) {
+            logger.error(`[SHARE] ❌ Failed to click Share button: ${error.message}`);
             throw new Error(`Failed to click Share button: ${error.message}`);
         }
     }
@@ -533,31 +561,48 @@ class MetaReelsUploader {
      */
     async waitForConfirmation() {
         try {
+            logger.log('[CONFIRM] Waiting for posting confirmation...');
+
             // Wait for success indicators
             const maxWait = 30000;
             const startTime = Date.now();
 
             while (Date.now() - startTime < maxWait) {
-                const hasConfirmation = await this.page.evaluate(() => {
+                const confirmationStatus = await this.page.evaluate(() => {
                     const text = document.body.innerText.toLowerCase();
-                    return text.includes('shared') ||
+                    const hasSuccessText = text.includes('shared') ||
                         text.includes('posted') ||
                         text.includes('published') ||
-                        text.includes('your reel');
+                        text.includes('your reel is live') ||
+                        text.includes('reel posted');
+
+                    // Also check for error messages
+                    const hasError = text.includes('error') ||
+                        text.includes('failed') ||
+                        text.includes('try again');
+
+                    return { hasSuccessText, hasError };
                 });
 
-                if (hasConfirmation) {
-                    logger.success('Posting confirmed!');
+                if (confirmationStatus.hasSuccessText) {
+                    logger.success('[CONFIRM] ✅ Posting confirmed! Video successfully shared.');
                     await randomDelay();
                     return;
+                }
+
+                if (confirmationStatus.hasError) {
+                    throw new Error('Error detected on page - posting may have failed');
                 }
 
                 await this.page.waitForTimeout(1000);
             }
 
-            logger.warn('No explicit confirmation found, assuming success');
+            // If we reach here, no confirmation was found
+            logger.error('[CONFIRM] ❌ No confirmation found within timeout');
+            throw new Error('No posting confirmation detected after 30 seconds. Video may not have been posted.');
         } catch (error) {
-            logger.warn(`Confirmation check error: ${error.message}`);
+            logger.error(`[CONFIRM] Confirmation check failed: ${error.message}`);
+            throw error;
         }
     }
 }
