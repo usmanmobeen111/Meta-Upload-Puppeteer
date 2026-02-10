@@ -1,18 +1,18 @@
 /**
  * Random Delay Utility
- * Generates random delays between 10.00 and 19.99 seconds
+ * Generates random delays between 5.00 and 14.99 seconds
  */
 
 /**
- * Generate a random delay value between 10.00 and 19.99 seconds
+ * Generate a random delay value between 5.00 and 14.99 seconds
  * Format: 2 digits before decimal, 2 digits after decimal
  * @returns {number} Random delay in seconds
  */
 function generateRandomDelay() {
-  // Generate random number between 10.00 and 19.99
-  // Min: 10.00 (1000 cents), Max: 19.99 (1999 cents)
-  const min = 1000; // 10.00 * 100
-  const max = 1999; // 19.99 * 100
+  // Generate random number between 5.00 and 14.99
+  // Min: 5.00 (500 cents), Max: 14.99 (1499 cents)
+  const min = 500; // 5.00 * 100
+  const max = 1499; // 14.99 * 100
 
   const randomCents = Math.floor(Math.random() * (max - min + 1)) + min;
   const seconds = randomCents / 100;
