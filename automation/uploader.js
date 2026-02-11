@@ -622,72 +622,144 @@ class MetaReelsUploader {
     async clickShareButton() {
         try {
             logger.log('[SHARE] Clicking Share/Publish button...');
-
             await this.page.waitForTimeout(2000);
 
-            // Strategy: XPath + real mouse click
-            logger.log('[SHARE] Strategy: XPath search for Share/Publish button...');
+            let shareClicked = false;
+            let strategy = '';
 
-            const xpath =
-                "//div[@role='button' and (.//div[contains(text(),'Share')] or .//div[contains(text(),'Publish')])]";
-
-            const buttons = await this.page.$x(xpath);
-
-            if (!buttons.length) {
-                throw new Error("Share/Publish button not found using XPath");
+            // Strategy 1: XPath exact match with aria-busy check
+            logger.log('[SHARE] Strategy 1: XPath exact match with aria-busy="false"...');
+            try {
+                const xpath1 = `//div[@role='button' and @aria-busy='false' and .//div[normalize-space(text())='Share']]`;
+                const [button1] = await this.page.$x(xpath1);
+                if (button1) {
+                    await button1.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+                    await this.page.waitForTimeout(500);
+                    await button1.hover();
+                    await this.page.waitForTimeout(300);
+                    await button1.click();
+                    shareClicked = true;
+                    strategy = 'XPath exact match with aria-busy';
+                    logger.success('[SHARE] Share button clicked (Strategy 1: XPath exact match)');
+                }
+            } catch (e) {
+                logger.warn(`[SHARE] Strategy 1 failed: ${e.message}`);
             }
 
-            logger.log(`[SHARE] Found ${buttons.length} Share/Publish candidate button(s)`);
-
-            // Try clicking the first visible one
-            for (let i = 0; i < buttons.length; i++) {
-                const btn = buttons[i];
-
-                await btn.evaluate(el => el.scrollIntoView({ behavior: "smooth", block: "center" }));
-                await this.page.waitForTimeout(800);
-
-                const box = await btn.boundingBox();
-
-                if (!box) {
-                    logger.warn(`[SHARE] Button #${i + 1} has no bounding box (not visible)`);
-                    continue;
-                }
-
-                logger.log(`[SHARE] Clicking Share button #${i + 1} using mouse coordinates...`);
-
-                // Click the button 3 times to ensure it registers
-                for (let clickNum = 1; clickNum <= 3; clickNum++) {
-                    await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-                    await this.page.waitForTimeout(200);
-
-                    await this.page.mouse.down();
-                    await this.page.waitForTimeout(120);
-                    await this.page.mouse.up();
-
-                    logger.log(`[SHARE] Click ${clickNum}/3 completed`);
-
-                    // Small delay between clicks
-                    if (clickNum < 3) {
+            // Strategy 2: XPath exact match without aria-busy
+            if (!shareClicked) {
+                logger.log('[SHARE] Strategy 2: XPath exact match without aria-busy...');
+                try {
+                    const xpath2 = `//div[@role='button' and .//div[normalize-space(text())='Share']]`;
+                    const [button2] = await this.page.$x(xpath2);
+                    if (button2) {
+                        await button2.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
                         await this.page.waitForTimeout(500);
+                        await button2.hover();
+                        await this.page.waitForTimeout(300);
+                        await button2.click();
+                        shareClicked = true;
+                        strategy = 'XPath exact match without aria-busy';
+                        logger.success('[SHARE] Share button clicked (Strategy 2: XPath exact match)');
                     }
+                } catch (e) {
+                    logger.warn(`[SHARE] Strategy 2 failed: ${e.message}`);
                 }
-
-                logger.success(`[SHARE] ✅ Share/Publish clicked successfully 3 times (button #${i + 1})`);
-
-                // Wait after clicks
-                await this.page.waitForTimeout(3000);
-
-                logger.log(`[SHARE] Current URL after click: ${this.page.url()}`);
-                logger.success('[SHARE] ✅ Share action completed');
-
-                return;
             }
 
-            throw new Error("Found Share/Publish button but could not click any visible one");
+            // Strategy 3: XPath contains
+            if (!shareClicked) {
+                logger.log('[SHARE] Strategy 3: XPath contains...');
+                try {
+                    const xpath3 = `//div[@role='button' and contains(., 'Share')]`;
+                    const [button3] = await this.page.$x(xpath3);
+                    if (button3) {
+                        await button3.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+                        await this.page.waitForTimeout(500);
+                        await button3.hover();
+                        await this.page.waitForTimeout(300);
+                        await button3.click();
+                        shareClicked = true;
+                        strategy = 'XPath contains';
+                        logger.success('[SHARE] Share button clicked (Strategy 3: XPath contains)');
+                    }
+                } catch (e) {
+                    logger.warn(`[SHARE] Strategy 3 failed: ${e.message}`);
+                }
+            }
+
+            // Strategy 4: Helper clickButtonByText("Share")
+            if (!shareClicked) {
+                logger.log('[SHARE] Strategy 4: Helper clickButtonByText("Share")...');
+                try {
+                    if (typeof this.clickButtonByText === 'function') {
+                        await this.clickButtonByText('Share');
+                        shareClicked = true;
+                        strategy = 'Helper clickButtonByText("Share")';
+                        logger.success('[SHARE] Share button clicked (Strategy 4: Helper)');
+                    }
+                } catch (e) {
+                    logger.warn(`[SHARE] Strategy 4 failed: ${e.message}`);
+                }
+            }
+
+            // Strategy 5: Helper clickButtonByText("Publish")
+            if (!shareClicked) {
+                logger.log('[SHARE] Strategy 5: Helper clickButtonByText("Publish")...');
+                try {
+                    if (typeof this.clickButtonByText === 'function') {
+                        await this.clickButtonByText('Publish');
+                        shareClicked = true;
+                        strategy = 'Helper clickButtonByText("Publish")';
+                        logger.success('[SHARE] Share button clicked (Strategy 5: Helper Publish)');
+                    }
+                } catch (e) {
+                    logger.warn(`[SHARE] Strategy 5 failed: ${e.message}`);
+                }
+            }
+
+            // Strategy 6: Fallback to page.evaluate click
+            if (!shareClicked) {
+                logger.log('[SHARE] Strategy 6: Fallback page.evaluate click...');
+                shareClicked = await this.page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('div[role="button"]'));
+                    const shareButton = buttons.find(btn => {
+                        const text = (btn.textContent || '').trim();
+                        return text === 'Share' || text === 'Publish';
+                    });
+                    if (shareButton) {
+                        shareButton.click();
+                        return true;
+                    }
+                    return false;
+                });
+                if (shareClicked) {
+                    strategy = 'page.evaluate fallback';
+                    logger.success('[SHARE] Share button clicked (Strategy 6: page.evaluate)');
+                }
+            }
+
+            if (!shareClicked) {
+                throw new Error('Share button not clicked by any strategy');
+            }
+
+            // Verify UI state change
+            await this.page.waitForTimeout(2000);
+            const stateChanged = await this.page.evaluate(() => {
+                const text = document.body.innerText.toLowerCase();
+                return text.includes('posting') || text.includes('publishing') || text.includes('sharing');
+            });
+
+            if (stateChanged) {
+                logger.success(`[SHARE] UI state change detected after ${strategy}`);
+            }
+
+            await this.page.waitForTimeout(1000);
+            logger.success(`[SHARE] Share action completed using: ${strategy}`);
 
         } catch (error) {
-            logger.error(`[SHARE] ❌ Failed to click Share button: ${error.message}`);
-            throw new Error(`Failed to click Share button: ${error.message}`);
+            logger.error(`[SHARE] Failed: ${error.message}`);
+            throw error;
         }
     }
 
@@ -697,47 +769,134 @@ class MetaReelsUploader {
      */
     async waitForConfirmation() {
         try {
-            logger.log('[CONFIRM] Waiting for posting confirmation...');
+            logger.log('[CONFIRM] Waiting for posting confirmation (up to 180 seconds)...');
 
-            // Wait for success indicators
-            const maxWait = 30000;
+            const maxWait = 180000; // 3 minutes
             const startTime = Date.now();
+            const screenshotInterval = 15000; // 15 seconds
+            let lastScreenshotTime = startTime;
+            let screenshotCount = 0;
 
             while (Date.now() - startTime < maxWait) {
-                const confirmationStatus = await this.page.evaluate(() => {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+
+                // Check all signals
+                const signals = await this.page.evaluate(() => {
                     const text = document.body.innerText.toLowerCase();
-                    const hasSuccessText = text.includes('shared') ||
-                        text.includes('posted') ||
-                        text.includes('published') ||
-                        text.includes('your reel is live') ||
-                        text.includes('reel posted');
+                    const html = document.documentElement.innerHTML.toLowerCase();
 
-                    // Also check for error messages
-                    const hasError = text.includes('error') ||
-                        text.includes('failed') ||
-                        text.includes('try again');
+                    // Signal A: Success text
+                    const successKeywords = [
+                        'your reel is live',
+                        'reel posted',
+                        'posted',
+                        'published',
+                        'shared successfully',
+                        'your post is now published'
+                    ];
+                    const hasSuccessText = successKeywords.some(keyword => text.includes(keyword) || html.includes(keyword));
 
-                    return { hasSuccessText, hasError };
+                    // Signal B: Error detection
+                    const errorKeywords = [
+                        'something went wrong',
+                        'try again',
+                        'error',
+                        'failed',
+                        'could not publish',
+                        'publishing failed'
+                    ];
+                    const hasError = errorKeywords.some(keyword => text.includes(keyword));
+
+                    // Signal C: Share button state
+                    const shareButtons = Array.from(document.querySelectorAll('div[role="button"]'));
+                    const shareButton = shareButtons.find(btn => {
+                        const btnText = (btn.textContent || '').trim();
+                        return btnText === 'Share' || btnText === 'Publish';
+                    });
+
+                    const shareButtonDisappeared = !shareButton;
+                    const shareButtonDisabled = shareButton ? shareButton.getAttribute('aria-disabled') === 'true' : false;
+                    const shareButtonBusy = shareButton ? shareButton.getAttribute('aria-busy') === 'true' : false;
+                    const shareButtonStateChanged = shareButtonDisappeared || shareButtonDisabled || shareButtonBusy;
+
+                    // Signal D: Progress indicators
+                    const progressKeywords = ['posting', 'publishing', 'sharing'];
+                    const hasProgressIndicator = progressKeywords.some(keyword => text.includes(keyword) || html.includes(keyword));
+
+                    return {
+                        hasSuccessText,
+                        hasError,
+                        shareButtonDisappeared,
+                        shareButtonDisabled,
+                        shareButtonBusy,
+                        shareButtonStateChanged,
+                        hasProgressIndicator
+                    };
                 });
 
-                if (confirmationStatus.hasSuccessText) {
-                    logger.success('[CONFIRM] ✅ Posting confirmed! Video successfully shared.');
-                    await randomDelay();
+                // Signal E: URL change
+                const currentUrl = this.page.url();
+                const urlChanged = !currentUrl.includes('reels_composer') ||
+                    currentUrl.includes('published') ||
+                    currentUrl.includes('content');
+
+                // Check for errors first
+                if (signals.hasError) {
+                    logger.error('[CONFIRM] Error detected on page!');
+                    throw new Error('Error detected during posting');
+                }
+
+                // Check for success
+                if (signals.hasSuccessText) {
+                    logger.success(`[CONFIRM] Posting confirmed via success text after ${elapsed} seconds!`);
                     return;
                 }
 
-                if (confirmationStatus.hasError) {
-                    throw new Error('Error detected on page - posting may have failed');
+                // Check URL change
+                if (urlChanged) {
+                    logger.success(`[CONFIRM] Posting confirmed via URL change after ${elapsed} seconds!`);
+                    logger.log(`[CONFIRM] New URL: ${currentUrl}`);
+                    return;
                 }
 
-                await this.page.waitForTimeout(1000);
+                // Log share button state changes
+                if (signals.shareButtonStateChanged) {
+                    if (signals.shareButtonDisappeared) {
+                        logger.log(`[CONFIRM] Share button disappeared - posting likely in progress (${elapsed}s)`);
+                    } else if (signals.shareButtonDisabled) {
+                        logger.log(`[CONFIRM] Share button disabled - posting in progress (${elapsed}s)`);
+                    } else if (signals.shareButtonBusy) {
+                        logger.log(`[CONFIRM] Share button busy - posting in progress (${elapsed}s)`);
+                    }
+                }
+
+                // Log progress indicators
+                if (signals.hasProgressIndicator) {
+                    logger.log(`[CONFIRM] Progress indicator detected (${elapsed}s)`);
+                }
+
+                // Signal F: Take screenshot every 15 seconds
+                if (Date.now() - lastScreenshotTime >= screenshotInterval) {
+                    screenshotCount++;
+                    const screenshotPath = `./debug_confirmation_${screenshotCount}_${elapsed}s.png`;
+                    await this.page.screenshot({ path: screenshotPath, fullPage: true });
+                    logger.log(`[CONFIRM] Debug screenshot saved: ${screenshotPath} (${elapsed}s elapsed)`);
+                    lastScreenshotTime = Date.now();
+                }
+
+                // Wait before next check
+                await this.page.waitForTimeout(2000);
             }
 
-            // If we reach here, no confirmation was found
-            logger.error('[CONFIRM] ❌ No confirmation found within timeout');
-            throw new Error('No posting confirmation detected after 30 seconds. Video may not have been posted.');
+            // Timeout reached
+            logger.error('[CONFIRM] No posting confirmation detected after 180 seconds.');
+            const finalScreenshot = `./debug_confirmation_timeout.png`;
+            await this.page.screenshot({ path: finalScreenshot, fullPage: true });
+            logger.log(`[CONFIRM] Final timeout screenshot saved: ${finalScreenshot}`);
+            throw new Error('No posting confirmation detected after 180 seconds.');
+
         } catch (error) {
-            logger.error(`[CONFIRM] Confirmation check failed: ${error.message}`);
+            logger.error(`[CONFIRM] Failed: ${error.message}`);
             throw error;
         }
     }
