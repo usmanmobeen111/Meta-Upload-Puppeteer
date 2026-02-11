@@ -18,6 +18,7 @@ const {
     pasteTextWithEmojis
 } = require('./helpers');
 const AdsPowerClient = require('./adsPowerClient');
+const { applyCaptionWithRetry } = require('./captionHandler');
 
 // Step names for debug tracking
 const STEPS = {
@@ -220,9 +221,9 @@ class MetaReelsUploader {
         await waitForUploadComplete(this.page, this.config.uploadTimeoutSeconds);
         await debugCapture(this.page, folderName, STEPS.WAIT_UPLOAD, this.config);
 
-        // STEP 6: Paste caption
+        // STEP 6: Paste caption with React state updates and verification
         logger.step('STEP 6: Pasting caption...');
-        await this.pasteCaption(caption);
+        await applyCaptionWithRetry(this.page, caption, 3);
         await debugCapture(this.page, folderName, STEPS.PASTE_CAPTION, this.config);
 
         // STEP 7: Click first Next button
