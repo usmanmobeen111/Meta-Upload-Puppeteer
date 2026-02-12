@@ -409,6 +409,375 @@ async function waitForNavigationOrTimeout(page, timeoutMs = 5000) {
     }
 }
 
+/**
+ * Click "Create Post" button
+ * @param {Object} page - Puppeteer page
+ * @param {number} retries - Number of retry attempts
+ */
+async function clickCreatePost(page, retries = 3) {
+    logger.log('[POST] Clicking "Create Post" button...');
+    await clickButtonByText(page, 'Create Post', retries);
+    logger.success('[POST] ✅ Clicked Create Post');
+}
+
+/**
+ * Open "Add video" dropdown (for Post workflow)
+ * @param {Object} page - Puppeteer page
+ * @param {number} retries - Number of retry attempts
+ */
+async function openAddVideoDropdown(page, retries = 3) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            logger.log(`[POST] Opening "Add video" dropdown (Attempt ${attempt}/${retries})...`);
+            await page.waitForTimeout(1000);
+
+            // Strategy 1: Click button with text "Add video"
+            let clicked = await page.evaluate(() => {
+                const buttons = [...document.querySelectorAll('[role="button"], button')];
+                const target = buttons.find(el => {
+                    const text = (el.innerText || '').trim();
+                    return text.toLowerCase().includes('add video');
+                });
+                if (target) {
+                    target.click();
+                    return true;
+                }
+                return false;
+            });
+
+            if (clicked) {
+                logger.success('[POST] ✅ Opened Add video dropdown (Strategy 1)');
+                await randomDelay();
+                return true;
+            }
+
+            // Strategy 2: XPath search
+            logger.log('[POST] Strategy 2: Using XPath...');
+            const [dropdown] = await page.$x("//div[@role='button' and contains(., 'Add video')]");
+            if (dropdown) {
+                await dropdown.click();
+                logger.success('[POST] ✅ Opened Add video dropdown (Strategy 2: XPath)');
+                await randomDelay();
+                return true;
+            }
+
+            if (attempt < retries) {
+                await page.waitForTimeout(2000);
+            }
+        } catch (error) {
+            logger.warn(`[POST] Error opening dropdown: ${error.message}`);
+            if (attempt === retries) throw error;
+        }
+    }
+    throw new Error('Failed to open Add video dropdown');
+}
+
+/**
+ * Click "Upload from computer" option in dropdown
+ * @param {Object} page - Puppeteer page
+ * @param {number} retries - Number of retry attempts
+ */
+async function clickUploadFromComputer(page, retries = 3) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            logger.log(`[POST] Clicking "Upload from computer" (Attempt ${attempt}/${retries})...`);
+            await page.waitForTimeout(1000);
+
+            // Strategy 1: Exact text match
+            let clicked = await page.evaluate(() => {
+                const allElements = [...document.querySelectorAll('[role="button"], div, span, a')];
+                const target = allElements.find(el => {
+                    const text = (el.innerText || '').trim();
+                    return text.toLowerCase().includes('upload from computer');
+                });
+                if (target) {
+                    target.click();
+                    return true;
+                }
+                return false;
+            });
+
+            if (clicked) {
+                logger.success('[POST] ✅ Clicked "Upload from computer" (Strategy 1)');
+                await randomDelay();
+                return true;
+            }
+
+            // Strategy 2: Use helper function
+            await clickButtonByText(page, 'Upload from computer', 1);
+            logger.success('[POST] ✅ Clicked "Upload from computer" (Strategy 2: Helper)');
+            await randomDelay();
+            return true;
+
+        } catch (error) {
+            if (attempt < retries) {
+                logger.warn(`[POST] Retry ${attempt}...`);
+                await page.waitForTimeout(2000);
+            } else {
+                throw new Error(`Failed to click Upload from computer: ${error.message}`);
+            }
+        }
+    }
+}
+
+/**
+ * Wait for Post upload to complete
+ * Similar to waitForUploadComplete but for Post workflow
+ * @param {Object} page - Puppeteer page
+ * @param {number} timeoutSeconds - Maximum wait time in seconds
+ */
+async function waitForPostUploadComplete(page, timeoutSeconds = 300) {
+    logger.log(`[POST] Monitoring upload progress (max ${timeoutSeconds}s)...`);
+
+    const startTime = Date.now();
+    const maxWaitMs = timeoutSeconds * 1000;
+    let lastPercentage = 0;
+
+    while (Date.now() - startTime < maxWaitMs) {
+        try {
+            // Check for upload completion indicators
+            const uploadStatus = await page.evaluate(() => {
+                // Look for percentage text
+                const allElements = [...document.querySelectorAll('span, div')];
+                const percentageElement = allElements.find(el =>
+                    el.textContent && /^\d+%$/.test(el.textContent.trim())
+                );
+
+                if (percentageElement) {
+                    return {
+                        isUploading: true,
+                        percentage: parseInt(percentageElement.textContent.trim())
+                    };
+                }
+
+                // Check for progress bars
+                const progressBars = document.querySelectorAll('[role="progressbar"]');
+                if (progressBars.length > 0) {
+                    return { isUploading: true, percentage: null };
+                }
+
+                // Check for "Uploaded" or "Ready" text
+                const text = document.body.innerText.toLowerCase();
+                if (text.includes('uploaded') || text.includes('ready')) {
+                    return { isUploading: false, percentage: 100 };
+                }
+
+                return { isUploading: false, percentage: null };
+            });
+
+            if (uploadStatus.percentage !== null && uploadStatus.percentage !== lastPercentage) {
+                logger.log(`[POST] Progress: ${uploadStatus.percentage}%`);
+                lastPercentage = uploadStatus.percentage;
+
+                if (uploadStatus.percentage >= 100) {
+                    logger.success('[POST] Upload reached 100%!');
+                    await page.waitForTimeout(3000);
+                    logger.success('[POST] ✅ Upload complete!');
+                    await randomDelay();
+                    return true;
+                }
+            }
+
+            if (!uploadStatus.isUploading) {
+                logger.success('[POST] ✅ Upload complete!');
+                await randomDelay();
+                return true;
+            }
+
+            await page.waitForTimeout(1000);
+        } catch (error) {
+            logger.warn(`[POST] Error checking upload: ${error.message}`);
+            await page.waitForTimeout(1000);
+        }
+    }
+
+    throw new Error(`Post upload did not complete within ${timeoutSeconds} seconds`);
+}
+
+/**
+ * Click "Publish" button (for Post workflow)
+ * @param {Object} page - Puppeteer page
+ * @param {number} retries - Number of retry attempts
+ */
+async function clickPublishButton(page, retries = 3) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            logger.log(`[POST] Clicking "Publish" button (Attempt ${attempt}/${retries})...`);
+            await page.waitForTimeout(2000);
+
+            // Strategy 1: XPath exact match with aria-busy check
+            logger.log('[POST] Strategy 1: XPath with aria-busy...');
+            const xpath1 = `//div[@role='button' and @aria-busy='false' and .//div[normalize-space(text())='Publish']]`;
+            const [button1] = await page.$x(xpath1);
+            if (button1) {
+                await button1.click();
+                logger.success('[POST] ✅ Clicked Publish (Strategy 1: XPath)');
+                await randomDelay();
+                return true;
+            }
+
+            // Strategy 2: Use helper function
+            logger.log('[POST] Strategy 2: Helper function...');
+            await clickButtonByText(page, 'Publish', 1);
+            logger.success('[POST] ✅ Clicked Publish (Strategy 2: Helper)');
+            await randomDelay();
+            return true;
+
+        } catch (error) {
+            if (attempt < retries) {
+                logger.warn(`[POST] Retry ${attempt}...`);
+                await page.waitForTimeout(2000);
+            } else {
+                throw new Error(`Failed to click Publish button: ${error.message}`);
+            }
+        }
+    }
+}
+
+/**
+ * Wait for publish confirmation
+ * @param {Object} page - Puppeteer page
+ * @param {number} timeoutSeconds - Maximum wait time in seconds
+ */
+async function waitForPublishConfirmation(page, timeoutSeconds = 180) {
+    logger.log(`[POST] Waiting for publish confirmation (max ${timeoutSeconds}s)...`);
+
+    const startTime = Date.now();
+    const maxWaitMs = timeoutSeconds * 1000;
+
+    while (Date.now() - startTime < maxWaitMs) {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+
+        try {
+            const signals = await page.evaluate(() => {
+                const text = document.body.innerText.toLowerCase();
+                const html = document.documentElement.innerHTML.toLowerCase();
+
+                // Success keywords for Post
+                const successKeywords = [
+                    'published',
+                    'posted',
+                    'your post is live',
+                    'your post is now published',
+                    'post successful'
+                ];
+                const hasSuccess = successKeywords.some(keyword => 
+                    text.includes(keyword) || html.includes(keyword)
+                );
+
+                // Error detection
+                const errorKeywords = ['error', 'failed', 'try again', 'something went wrong'];
+                const hasError = errorKeywords.some(keyword => text.includes(keyword));
+
+                return { hasSuccess, hasError };
+            });
+
+            if (signals.hasSuccess) {
+                logger.success('[POST] ✅ Post published successfully!');
+                return true;
+            }
+
+            if (signals.hasError) {
+                throw new Error('Publish failed - error detected on page');
+            }
+
+            // Log progress every 10 seconds
+            if (elapsed % 10 === 0) {
+                logger.log(`[POST] Still waiting... (${elapsed}s elapsed)`);
+            }
+
+            await page.waitForTimeout(2000);
+        } catch (error) {
+            if (error.message.includes('error detected')) {
+                throw error;
+            }
+            // Continue waiting
+            await page.waitForTimeout(2000);
+        }
+    }
+
+    throw new Error(`Publish confirmation not detected within ${timeoutSeconds} seconds`);
+}
+
+/**
+ * Fill optional Title and Description fields if they exist
+ * @param {Object} page - Puppeteer page
+ * @param {string} caption - Caption text to use
+ */
+async function fillOptionalTitleDescription(page, caption) {
+    try {
+        logger.log('[POST] Checking for optional Title/Description fields...');
+
+        // Check if Title field exists
+        const hasTitleField = await page.evaluate(() => {
+            const labels = [...document.querySelectorAll('label')];
+            return labels.some(label => 
+                (label.innerText || '').toLowerCase().includes('title')
+            );
+        });
+
+        if (hasTitleField) {
+            logger.log('[POST] Title field found, filling it...');
+            const title = caption.substring(0, 60);
+            
+            // Try to find and fill title input
+            await page.evaluate((titleText) => {
+                const inputs = [...document.querySelectorAll('input, textarea')];
+                const titleInput = inputs.find(input => {
+                    const label = input.previousElementSibling;
+                    return label && (label.innerText || '').toLowerCase().includes('title');
+                });
+                
+                if (titleInput) {
+                    titleInput.value = titleText;
+                    titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    titleInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }, title);
+            
+            logger.success(`[POST] ✅ Title filled: "${title}"`);
+        }
+
+        // Check if Description field exists
+        const hasDescriptionField = await page.evaluate(() => {
+            const labels = [...document.querySelectorAll('label')];
+            return labels.some(label => 
+                (label.innerText || '').toLowerCase().includes('description')
+            );
+        });
+
+        if (hasDescriptionField) {
+            logger.log('[POST] Description field found, filling it...');
+            
+            // Try to find and fill description textarea
+            await page.evaluate((descText) => {
+                const inputs = [...document.querySelectorAll('textarea')];
+                const descInput = inputs.find(input => {
+                    const label = input.previousElementSibling;
+                    return label && (label.innerText || '').toLowerCase().includes('description');
+                });
+                
+                if (descInput) {
+                    descInput.value = descText;
+                    descInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    descInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }, caption);
+            
+            logger.success('[POST] ✅ Description filled');
+        }
+
+        if (!hasTitleField && !hasDescriptionField) {
+            logger.log('[POST] No optional Title/Description fields found - skipping');
+        }
+
+        await randomDelay();
+    } catch (error) {
+        logger.warn(`[POST] Could not fill optional fields: ${error.message}`);
+        // Non-fatal error, continue workflow
+    }
+}
+
 module.exports = {
     clickButtonWithSVG,
     waitForPageLoad,
@@ -417,5 +786,13 @@ module.exports = {
     waitForElementDisappear,
     waitForElementEnabled,
     pasteTextWithEmojis,
-    waitForNavigationOrTimeout
+    waitForNavigationOrTimeout,
+    // New Create Post workflow helpers
+    clickCreatePost,
+    openAddVideoDropdown,
+    clickUploadFromComputer,
+    waitForPostUploadComplete,
+    clickPublishButton,
+    waitForPublishConfirmation,
+    fillOptionalTitleDescription
 };

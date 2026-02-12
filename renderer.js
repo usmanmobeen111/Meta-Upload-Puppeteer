@@ -24,6 +24,7 @@ async function loadConfig() {
     if (config) {
         document.getElementById('apiKey').value = config.adspowerApiKey || '';
         document.getElementById('profileId').value = config.adspowerProfileId || '';
+        document.getElementById('pageId').value = config.facebookPageId || '';
         document.getElementById('debugMode').checked = config.debugMode || false;
     }
 }
@@ -36,6 +37,7 @@ function setupEventListeners() {
     document.getElementById('saveConfig').addEventListener('click', async () => {
         config.adspowerApiKey = document.getElementById('apiKey').value;
         config.adspowerProfileId = document.getElementById('profileId').value;
+        config.facebookPageId = document.getElementById('pageId').value;
         config.debugMode = document.getElementById('debugMode').checked;
 
         const result = await window.electronAPI.updateConfig(config);

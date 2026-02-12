@@ -10,17 +10,26 @@ const logger = require('../utils/logger');
 const { randomDelay } = require('../utils/randomDelay');
 const { debugCapture, captureErrorEvidence } = require('../utils/debugCapture');
 const { markAsPosted } = require('../utils/statusMarker');
+const { getVideoDuration } = require('../utils/videoDuration');
 const {
     clickButtonByText,
     clickButtonWithSVG,
     waitForPageLoad,
     waitForUploadComplete,
-    pasteTextWithEmojis
+    pasteTextWithEmojis,
+    // New Post workflow helpers
+    clickCreatePost,
+    openAddVideoDropdown,
+    clickUploadFromComputer,
+    waitForPostUploadComplete,
+    clickPublishButton,
+    waitForPublishConfirmation,
+    fillOptionalTitleDescription
 } = require('./helpers');
 const AdsPowerClient = require('./adsPowerClient');
 const { applyCaptionWithRetry } = require('./captionHandler');
 
-// Step names for debug tracking
+// Step names for debug tracking (Reel workflow)
 const STEPS = {
     OPEN_BUSINESS_SUITE: 'STEP_1_OPEN_BUSINESS_SUITE',
     CLICK_CREATE_REEL: 'STEP_2_CLICK_CREATE_REEL',
@@ -34,6 +43,20 @@ const STEPS = {
     CONFIRM_POSTED: 'STEP_10_CONFIRM_POSTED'
 };
 
+// Step names for Post workflow
+const POST_STEPS = {
+    OPEN_BUSINESS_SUITE: 'STEP_POST_1_OPEN_BUSINESS_SUITE',
+    CLICK_CREATE_POST: 'STEP_POST_2_CLICK_CREATE_POST',
+    CLICK_ADD_VIDEO_DROPDOWN: 'STEP_POST_3_CLICK_ADD_VIDEO_DROPDOWN',
+    CLICK_UPLOAD_FROM_COMPUTER: 'STEP_POST_4_CLICK_UPLOAD_FROM_COMPUTER',
+    UPLOAD_VIDEO: 'STEP_POST_5_UPLOAD_VIDEO',
+    WAIT_UPLOAD_COMPLETE: 'STEP_POST_6_WAIT_UPLOAD_COMPLETE',
+    FILL_CAPTION: 'STEP_POST_7_FILL_CAPTION',
+    FILL_OPTIONAL_FIELDS: 'STEP_POST_8_FILL_OPTIONAL_FIELDS',
+    CLICK_PUBLISH: 'STEP_POST_9_CLICK_PUBLISH',
+    CONFIRM_PUBLISHED: 'STEP_POST_10_CONFIRM_PUBLISHED'
+};
+
 class MetaReelsUploader {
     constructor(config) {
         this.config = config;
@@ -45,7 +68,8 @@ class MetaReelsUploader {
     }
 
     /**
-     * Upload a single video to Meta Reels
+     * Upload a single video to Meta (Reel or Post)
+     * Auto-detects video duration and routes to appropriate workflow
      * @param {Object} videoData - Video folder data
      * @returns {Promise<boolean>} Success status
      */
@@ -57,11 +81,40 @@ class MetaReelsUploader {
             logger.log(`Starting upload for: ${folderName}`);
             logger.log(`${'='.repeat(60)}\n`);
 
+            // STEP 0: Detect video duration
+            logger.log('🎬 Detecting video duration...');
+            const duration = await getVideoDuration(videoPath);
+            
+            let workflowType = 'REEL'; // Default to Reel workflow
+            
+            if (duration !== null) {
+                logger.log(`📏 Video duration: ${duration.toFixed(2)} seconds`);
+                
+                // Auto-select workflow based on duration
+                if (duration < 90) {
+                    workflowType = 'REEL';
+                    logger.log('✅ Duration < 90 seconds → Using REEL workflow');
+                } else {
+                    workflowType = 'POST';
+                    logger.log('✅ Duration >= 90 seconds → Using POST workflow');
+                }
+            } else {
+                logger.warn('⚠️ Could not detect video duration');
+                logger.warn('   Defaulting to REEL workflow');
+                logger.warn('   Install FFprobe to enable auto-routing');
+            }
+
             // Start AdsPower profile
             await this.startBrowser();
 
-            // Execute upload workflow (includes share and confirmation)
-            await this.executeWorkflow(folderName, videoPath, caption);
+            // Execute appropriate workflow
+            if (workflowType === 'POST') {
+                logger.log('\n📝 Executing CREATE POST workflow...\n');
+                await this.executePostWorkflow(folderName, videoPath, caption);
+            } else {
+                logger.log('\n🎥 Executing CREATE REEL workflow...\n');
+                await this.executeWorkflow(folderName, videoPath, caption);
+            }
 
             // Close browser first
             await this.closeBrowser();
@@ -168,12 +221,17 @@ class MetaReelsUploader {
     }
 
     /**
-     * Execute the complete upload workflow
+     * Execute the complete Reel upload workflow
      */
     async executeWorkflow(folderName, videoPath, caption) {
+        // Build dynamic URL with page ID from config
+        const metaBusinessUrl = this.config.facebookPageId
+            ? `https://business.facebook.com/latest/home?asset_id=${this.config.facebookPageId}`
+            : this.config.metaBusinessUrl;
+
         // STEP 1: Navigate to Meta Business Suite
         logger.step('STEP 1: Opening Meta Business Suite...');
-        await this.page.goto(this.config.metaBusinessUrl, {
+        await this.page.goto(metaBusinessUrl, {
             waitUntil: 'networkidle2',
             timeout: 60000
         });
@@ -247,6 +305,107 @@ class MetaReelsUploader {
         logger.step('STEP 10: Waiting for posting confirmation...');
         await this.waitForConfirmation();
         await debugCapture(this.page, folderName, STEPS.CONFIRM_POSTED, this.config);
+    }
+
+    /**
+     * Execute the complete CREATE POST workflow
+     * For videos >= 90 seconds
+     */
+    async executePostWorkflow(folderName, videoPath, caption) {
+        // Build dynamic URL with page ID from config
+        const metaBusinessUrl = this.config.facebookPageId
+            ? `https://business.facebook.com/latest/home?asset_id=${this.config.facebookPageId}`
+            : this.config.metaBusinessUrl;
+
+        // STEP 1: Navigate to Meta Business Suite
+        logger.step('STEP POST 1: Opening Meta Business Suite...');
+        await this.page.goto(metaBusinessUrl, {
+            waitUntil: 'networkidle2',
+            timeout: 60000
+        });
+        await randomDelay();
+        await debugCapture(this.page, folderName, POST_STEPS.OPEN_BUSINESS_SUITE, this.config);
+
+        // STEP 2: Click "Create Post"
+        logger.step('STEP POST 2: Clicking "Create Post" button...');
+        await clickCreatePost(this.page, this.config.maxRetries);
+        await this.page.waitForTimeout(2000);
+        await debugCapture(this.page, folderName, POST_STEPS.CLICK_CREATE_POST, this.config);
+
+        // STEP 3: Open "Add video" dropdown
+        logger.step('STEP POST 3: Opening "Add video" dropdown...');
+        await openAddVideoDropdown(this.page, this.config.maxRetries);
+        await this.page.waitForTimeout(1000);
+        await debugCapture(this.page, folderName, POST_STEPS.CLICK_ADD_VIDEO_DROPDOWN, this.config);
+
+        // STEP 4 & 5: Click "Upload from computer" and upload video
+        logger.step('STEP POST 4: Clicking "Upload from computer"...');
+        
+        // CRITICAL: Set up file chooser listener BEFORE clicking the button
+        logger.log('[UPLOAD] Setting up file chooser listener...');
+        const fileChooserPromise = this.page.waitForFileChooser({ timeout: 10000 });
+        
+        // Now click Upload from computer option
+        await clickUploadFromComputer(this.page, this.config.maxRetries);
+        
+        // Wait for the file chooser to appear
+        logger.step('STEP POST 5: Uploading video file...');
+        logger.log('[UPLOAD] Waiting for file chooser dialog to appear...');
+        const fileChooser = await fileChooserPromise;
+        
+        logger.success('[UPLOAD] File chooser detected!');
+        logger.log(`[UPLOAD] Uploading file: ${path.basename(videoPath)}`);
+        
+        // Accept the file
+        await fileChooser.accept([videoPath]);
+        logger.success(`[UPLOAD] ✅ Video uploaded successfully: ${path.basename(videoPath)}`);
+        
+        await randomDelay();
+        await debugCapture(this.page, folderName, POST_STEPS.UPLOAD_VIDEO, this.config);
+
+        // STEP 6: Wait for upload completion
+        logger.step('STEP POST 6: Waiting for upload to complete...');
+        await waitForPostUploadComplete(this.page, this.config.uploadTimeoutSeconds);
+        await debugCapture(this.page, folderName, POST_STEPS.WAIT_UPLOAD_COMPLETE, this.config);
+
+        // STEP 7: Fill caption (posts may have different caption field)
+        logger.step('STEP POST 7: Filling caption...');
+        try {
+            // Try using the same caption handler as Reels
+            await applyCaptionWithRetry(this.page, caption, 3);
+        } catch (captionError) {
+            logger.warn(`[POST] Standard caption method failed: ${captionError.message}`);
+            logger.log('[POST] Trying direct textarea method...');
+            
+            // Fallback: find textarea and fill it
+            await this.page.evaluate((captionText) => {
+                const textareas = [...document.querySelectorAll('textarea')];
+                if (textareas.length > 0) {
+                    const textarea = textareas[0];
+                    textarea.value = captionText;
+                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }, caption);
+            
+            logger.success('[POST] ✅ Caption filled (fallback method)');
+        }
+        await debugCapture(this.page, folderName, POST_STEPS.FILL_CAPTION, this.config);
+
+        // STEP 8: Fill optional Title/Description fields if they exist
+        logger.step('STEP POST 8: Checking for optional Title/Description fields...');
+        await fillOptionalTitleDescription(this.page, caption);
+        await debugCapture(this.page, folderName, POST_STEPS.FILL_OPTIONAL_FIELDS, this.config);
+
+        // STEP 9: Click Publish button
+        logger.step('STEP POST 9: Clicking "Publish" button...');
+        await clickPublishButton(this.page, this.config.maxRetries);
+        await debugCapture(this.page, folderName, POST_STEPS.CLICK_PUBLISH, this.config);
+
+        // STEP 10: Wait for publish confirmation
+        logger.step('STEP POST 10: Waiting for publish confirmation...');
+        await waitForPublishConfirmation(this.page);
+        await debugCapture(this.page, folderName, POST_STEPS.CONFIRM_PUBLISHED, this.config);
     }
 
     /**
