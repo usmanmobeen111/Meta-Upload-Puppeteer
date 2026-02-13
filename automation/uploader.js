@@ -20,7 +20,7 @@ const {
     // New Post workflow helpers
     clickCreatePost,
     openAddVideoDropdown,
-    clickUploadFromComputer,
+    clickUploadFromDesktop,
     waitForPostUploadComplete,
     clickPublishButton,
     waitForPublishConfirmation,
@@ -28,6 +28,7 @@ const {
 } = require('./helpers');
 const AdsPowerClient = require('./adsPowerClient');
 const { applyCaptionWithRetry } = require('./captionHandler');
+const { uploadVideoInMetaPostWorkflow } = require('./uploadStrategies');
 
 // Step names for debug tracking (Reel workflow)
 const STEPS = {
@@ -338,36 +339,24 @@ class MetaReelsUploader {
         await this.page.waitForTimeout(1000);
         await debugCapture(this.page, folderName, POST_STEPS.CLICK_ADD_VIDEO_DROPDOWN, this.config);
 
-        // STEP 4 & 5: Click "Upload from computer" and upload video
-        logger.step('STEP POST 4: Clicking "Upload from computer"...');
+        // STEP 4 & 5: Upload video using multi-strategy system
+        logger.step('STEP POST 4 & 5: Uploading video with multi-strategy system...');
         
-        // CRITICAL: Set up file chooser listener BEFORE clicking the button
-        logger.log('[UPLOAD] Setting up file chooser listener...');
-        const fileChooserPromise = this.page.waitForFileChooser({ timeout: 10000 });
-        
-        // Now click Upload from computer option
-        await clickUploadFromComputer(this.page, this.config.maxRetries);
-        
-        // Wait for the file chooser to appear
-        logger.step('STEP POST 5: Uploading video file...');
-        logger.log('[UPLOAD] Waiting for file chooser dialog to appear...');
-        const fileChooser = await fileChooserPromise;
-        
-        logger.success('[UPLOAD] File chooser detected!');
-        logger.log(`[UPLOAD] Uploading file: ${path.basename(videoPath)}`);
-        
-        // Accept the file
-        await fileChooser.accept([videoPath]);
-        logger.success(`[UPLOAD] ✅ Video uploaded successfully: ${path.basename(videoPath)}`);
+        // Use the new multi-strategy upload system
+        // This will attempt 6 different upload strategies in order:
+        // 1. FileChooser API with real mouse clicks
+        // 2. Find <input type="file"> in main DOM
+        // 3. Search all iframes for file inputs
+        // 4. Shadow DOM deep search
+        // 5. Drag-and-drop upload simulation
+        // 6. Emergency file input injection
+        await uploadVideoInMetaPostWorkflow(this.page, videoPath, this.config);
         
         await randomDelay();
         await debugCapture(this.page, folderName, POST_STEPS.UPLOAD_VIDEO, this.config);
 
-        // STEP 6: Wait for upload completion
-        logger.step('STEP POST 6: Waiting for upload to complete...');
-        await waitForPostUploadComplete(this.page, this.config.uploadTimeoutSeconds);
-        await debugCapture(this.page, folderName, POST_STEPS.WAIT_UPLOAD_COMPLETE, this.config);
-
+        // STEP 6 is now handled by uploadVideoInMetaPostWorkflow (includes upload completion monitoring)
+        
         // STEP 7: Fill caption (posts may have different caption field)
         logger.step('STEP POST 7: Filling caption...');
         try {

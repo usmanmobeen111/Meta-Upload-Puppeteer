@@ -473,22 +473,22 @@ async function openAddVideoDropdown(page, retries = 3) {
 }
 
 /**
- * Click "Upload from computer" option in dropdown
+ * Click "Upload from desktop" option in dropdown
  * @param {Object} page - Puppeteer page
  * @param {number} retries - Number of retry attempts
  */
-async function clickUploadFromComputer(page, retries = 3) {
+async function clickUploadFromDesktop(page, retries = 3) {
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            logger.log(`[POST] Clicking "Upload from computer" (Attempt ${attempt}/${retries})...`);
+            logger.log(`[POST] Clicking "Upload from desktop" (Attempt ${attempt}/${retries})...`);
             await page.waitForTimeout(1000);
 
-            // Strategy 1: Exact text match
+            // Strategy 1: Search for "Upload from desktop" or "Upload from computer" (different variations)
             let clicked = await page.evaluate(() => {
                 const allElements = [...document.querySelectorAll('[role="button"], div, span, a')];
                 const target = allElements.find(el => {
-                    const text = (el.innerText || '').trim();
-                    return text.toLowerCase().includes('upload from computer');
+                    const text = (el.innerText || '').trim().toLowerCase();
+                    return text.includes('upload from desktop') || text.includes('upload from computer');
                 });
                 if (target) {
                     target.click();
@@ -498,23 +498,31 @@ async function clickUploadFromComputer(page, retries = 3) {
             });
 
             if (clicked) {
-                logger.success('[POST] ✅ Clicked "Upload from computer" (Strategy 1)');
+                logger.success('[POST] ✅ Clicked upload option (Strategy 1)');
                 await randomDelay();
                 return true;
             }
 
-            // Strategy 2: Use helper function
-            await clickButtonByText(page, 'Upload from computer', 1);
-            logger.success('[POST] ✅ Clicked "Upload from computer" (Strategy 2: Helper)');
-            await randomDelay();
-            return true;
+            // Strategy 2: Try "Upload from desktop" with helper
+            try {
+                await clickButtonByText(page, 'Upload from desktop', 1);
+                logger.success('[POST] ✅ Clicked "Upload from desktop" (Strategy 2: Helper)');
+                await randomDelay();
+                return true;
+            } catch (e1) {
+                // Strategy 3: Try "Upload from computer" as fallback
+                await clickButtonByText(page, 'Upload from computer', 1);
+                logger.success('[POST] ✅ Clicked "Upload from computer" (Strategy 3: Fallback)');
+                await randomDelay();
+                return true;
+            }
 
         } catch (error) {
             if (attempt < retries) {
                 logger.warn(`[POST] Retry ${attempt}...`);
                 await page.waitForTimeout(2000);
             } else {
-                throw new Error(`Failed to click Upload from computer: ${error.message}`);
+                throw new Error(`Failed to click upload option: ${error.message}`);
             }
         }
     }
@@ -790,7 +798,7 @@ module.exports = {
     // New Create Post workflow helpers
     clickCreatePost,
     openAddVideoDropdown,
-    clickUploadFromComputer,
+    clickUploadFromDesktop,
     waitForPostUploadComplete,
     clickPublishButton,
     waitForPublishConfirmation,
