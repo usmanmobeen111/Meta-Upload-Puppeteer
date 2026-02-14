@@ -247,7 +247,20 @@ ipcMain.handle('stop-process', async () => {
  */
 ipcMain.handle('open-folder', async (event, folderPath) => {
     const { shell } = require('electron');
-    shell.openPath(folderPath);
+    const path = require('path');
+    
+    // If no path provided or it's just "debug", use the debug folder from __dirname
+    let targetPath = folderPath;
+    if (!folderPath || folderPath === 'debug') {
+        targetPath = path.join(__dirname, 'debug');
+    }
+    
+    // Create debug folder if it doesn't exist
+    if (!fs.existsSync(targetPath)) {
+        fs.mkdirSync(targetPath, { recursive: true });
+    }
+    
+    shell.openPath(targetPath);
     return { success: true };
 });
 

@@ -16,19 +16,10 @@ const {
     clickButtonWithSVG,
     waitForPageLoad,
     waitForUploadComplete,
-    pasteTextWithEmojis,
-    // New Post workflow helpers
-    clickCreatePost,
-    openAddVideoDropdown,
-    clickUploadFromDesktop,
-    waitForPostUploadComplete,
-    clickPublishButton,
-    waitForPublishConfirmation,
-    fillOptionalTitleDescription
+    pasteTextWithEmojis
 } = require('./helpers');
 const AdsPowerClient = require('./adsPowerClient');
 const { applyCaptionWithRetry } = require('./captionHandler');
-const { uploadVideoInMetaPostWorkflow } = require('./uploadStrategies');
 
 // Step names for debug tracking (Reel workflow)
 const STEPS = {
@@ -44,20 +35,6 @@ const STEPS = {
     CONFIRM_POSTED: 'STEP_10_CONFIRM_POSTED'
 };
 
-// Step names for Post workflow
-const POST_STEPS = {
-    OPEN_BUSINESS_SUITE: 'STEP_POST_1_OPEN_BUSINESS_SUITE',
-    CLICK_CREATE_POST: 'STEP_POST_2_CLICK_CREATE_POST',
-    CLICK_ADD_VIDEO_DROPDOWN: 'STEP_POST_3_CLICK_ADD_VIDEO_DROPDOWN',
-    CLICK_UPLOAD_FROM_COMPUTER: 'STEP_POST_4_CLICK_UPLOAD_FROM_COMPUTER',
-    UPLOAD_VIDEO: 'STEP_POST_5_UPLOAD_VIDEO',
-    WAIT_UPLOAD_COMPLETE: 'STEP_POST_6_WAIT_UPLOAD_COMPLETE',
-    FILL_CAPTION: 'STEP_POST_7_FILL_CAPTION',
-    FILL_OPTIONAL_FIELDS: 'STEP_POST_8_FILL_OPTIONAL_FIELDS',
-    CLICK_PUBLISH: 'STEP_POST_9_CLICK_PUBLISH',
-    CONFIRM_PUBLISHED: 'STEP_POST_10_CONFIRM_PUBLISHED'
-};
-
 class MetaReelsUploader {
     constructor(config) {
         this.config = config;
@@ -69,8 +46,7 @@ class MetaReelsUploader {
     }
 
     /**
-     * Upload a single video to Meta (Reel or Post)
-     * Auto-detects video duration and routes to appropriate workflow
+     * Upload a single video to Meta as a REEL
      * @param {Object} videoData - Video folder data
      * @returns {Promise<boolean>} Success status
      */
@@ -79,43 +55,15 @@ class MetaReelsUploader {
 
         try {
             logger.log(`\n${'='.repeat(60)}`);
-            logger.log(`Starting upload for: ${folderName}`);
+            logger.log(`Starting REEL upload for: ${folderName}`);
             logger.log(`${'='.repeat(60)}\n`);
-
-            // STEP 0: Detect video duration
-            logger.log('🎬 Detecting video duration...');
-            const duration = await getVideoDuration(videoPath);
-            
-            let workflowType = 'REEL'; // Default to Reel workflow
-            
-            if (duration !== null) {
-                logger.log(`📏 Video duration: ${duration.toFixed(2)} seconds`);
-                
-                // Auto-select workflow based on duration
-                if (duration < 90) {
-                    workflowType = 'REEL';
-                    logger.log('✅ Duration < 90 seconds → Using REEL workflow');
-                } else {
-                    workflowType = 'POST';
-                    logger.log('✅ Duration >= 90 seconds → Using POST workflow');
-                }
-            } else {
-                logger.warn('⚠️ Could not detect video duration');
-                logger.warn('   Defaulting to REEL workflow');
-                logger.warn('   Install FFprobe to enable auto-routing');
-            }
 
             // Start AdsPower profile
             await this.startBrowser();
 
-            // Execute appropriate workflow
-            if (workflowType === 'POST') {
-                logger.log('\n📝 Executing CREATE POST workflow...\n');
-                await this.executePostWorkflow(folderName, videoPath, caption);
-            } else {
-                logger.log('\n🎥 Executing CREATE REEL workflow...\n');
-                await this.executeWorkflow(folderName, videoPath, caption);
-            }
+            // Execute REEL workflow
+            logger.log('\n🎥 Executing CREATE REEL workflow...\n');
+            await this.executeWorkflow(folderName, videoPath, caption);
 
             // Close browser first
             await this.closeBrowser();
@@ -222,6 +170,110 @@ class MetaReelsUploader {
     }
 
     /**
+     * Wait for Reel Composer/Modal to fully load after clicking Create Reel
+     * Handles React's dynamic UI updates with multiple detection strategies
+     * @param {string} folderName - Folder name for debug screenshots
+     * @param {number} maxWaitSeconds - Maximum wait time in seconds
+     * @returns {Promise<boolean>} True if composer loaded
+     */
+    async waitForReelComposerToLoad(folderName, maxWaitSeconds = 15) {
+        logger.log('[WAIT] Waiting for Reel composer to fully load...');
+        
+        const startTime = Date.now();
+        const maxWaitMs = maxWaitSeconds * 1000;
+        let attemptCount = 0;
+        
+        while (Date.now() - startTime < maxWaitMs) {
+            attemptCount++;
+            
+            try {
+                // Strategy: Check for multiple signals that composer is ready
+                const composerReady = await this.page.evaluate(() => {
+                    // Signal 1: File input exists (upload button ready)
+                    const fileInputs = document.querySelectorAll('input[type="file"]');
+                    
+                    // Signal 2: "Add video" text visible
+                    const bodyText = document.body.innerText.toLowerCase();
+                    const hasAddVideoText = bodyText.includes('add video') || bodyText.includes('add a video');
+                    
+                    // Signal 3: Modal/dialog container exists
+                    const modals = document.querySelectorAll('[role="dialog"], [role="modal"], .modal, [data-pagelet*="modal"]');
+                    
+                    // Signal 4: Composer-specific selectors
+                    const composerElements = document.querySelectorAll('[data-surface*="reel"], [data-pagelet*="reel"], [aria-label*="reel"]');
+                    
+                    // Return comprehensive state
+                    return {
+                        hasFileInput: fileInputs.length > 0,
+                        fileInputCount: fileInputs.length,
+                        hasAddVideoText: hasAddVideoText,
+                        hasModal: modals.length > 0,
+                        modalCount: modals.length,
+                        hasComposerElements: composerElements.length > 0,
+                        composerElementCount: composerElements.length
+                    };
+                });
+                
+                // Log current state every few attempts
+                if (attemptCount % 3 === 0) {
+                    logger.log(`[WAIT] Attempt ${attemptCount}: FileInputs=${composerReady.fileInputCount}, Modals=${composerReady.modalCount}, Composer=${composerReady.composerElementCount}`);
+                }
+                
+                // Composer is ready if we have at least 2 of these signals:
+                const signalsDetected = [
+                    composerReady.hasFileInput,
+                    composerReady.hasAddVideoText,
+                    composerReady.hasModal,
+                    composerReady.hasComposerElements
+                ].filter(Boolean).length;
+                
+                if (signalsDetected >= 2) {
+                    logger.success(`[WAIT] ✅ Reel composer loaded! (${signalsDetected}/4 signals detected)`);
+                    logger.log(`[WAIT] - File inputs: ${composerReady.fileInputCount}`);
+                    logger.log(`[WAIT] - Add Video text: ${composerReady.hasAddVideoText ? 'Yes' : 'No'}`);
+                    logger.log(`[WAIT] - Modal containers: ${composerReady.modalCount}`);
+                    logger.log(`[WAIT] - Composer elements: ${composerReady.composerElementCount}`);
+                    return true;
+                }
+                
+                // Wait before next check
+                await this.page.waitForTimeout(500);
+                
+            } catch (error) {
+                logger.warn(`[WAIT] Error checking composer state: ${error.message}`);
+                await this.page.waitForTimeout(500);
+            }
+        }
+        
+        // Timeout reached - capture debug evidence
+        logger.error(`[WAIT] ❌ Reel composer did not load within ${maxWaitSeconds} seconds!`);
+        
+        try {
+            // Capture final state for debugging
+            await debugCapture(this.page, folderName, 'CREATE_REEL_LOAD_FAILED', this.config);
+            
+            // Get detailed state info
+            const finalState = await this.page.evaluate(() => {
+                return {
+                    url: window.location.href,
+                    fileInputCount: document.querySelectorAll('input[type="file"]').length,
+                    modalCount: document.querySelectorAll('[role="dialog"], [role="modal"]').length,
+                    bodyTextSnippet: document.body.innerText.substring(0, 500)
+                };
+            });
+            
+            logger.error(`[WAIT] Final state: URL=${finalState.url}, FileInputs=${finalState.fileInputCount}, Modals=${finalState.modalCount}`);
+            logger.error(`[WAIT] Page text snippet: ${finalState.bodyTextSnippet.substring(0, 100)}...`);
+            
+        } catch (debugError) {
+            logger.warn(`[WAIT] Could not capture debug evidence: ${debugError.message}`);
+        }
+        
+        throw new Error('Reel composer failed to load - timeout waiting for UI to be ready');
+    }
+
+
+    /**
      * Execute the complete Reel upload workflow
      */
     async executeWorkflow(folderName, videoPath, caption) {
@@ -238,11 +290,65 @@ class MetaReelsUploader {
         });
         await randomDelay();
         await debugCapture(this.page, folderName, STEPS.OPEN_BUSINESS_SUITE, this.config);
+        
+        // CAPTURE HTML for debugging Create Reel button
+        logger.log('[DEBUG] Capturing page HTML for Create Reel button analysis...');
+        const html = await this.page.content();
+        const debugDir = path.join(__dirname, '..', 'debug');
+        if (!fs.existsSync(debugDir)) {
+            fs.mkdirSync(debugDir, { recursive: true });
+        }
+        const htmlPath = path.join(debugDir, `business_suite_${folderName.replace(/[^a-zA-Z0-9]/g, '_')}.html`);
+        fs.writeFileSync(htmlPath, html);
+        logger.success(`[DEBUG] HTML saved to: ${htmlPath}`);
 
-        // STEP 2: Click "Create Reel"
+        // STEP 2: Click "Create Reel" using exact selector
         logger.step('STEP 2: Clicking "Create Reel" button...');
-        await clickButtonByText(this.page, 'Create Reel', this.config.maxRetries);
-        await this.page.waitForTimeout(2000);
+        
+        // Use the exact data-surface attribute that Facebook uses
+        const createReelSelector = '[data-surface="/bizweb:home/lib:mbs_create_reel_button"]';
+        
+        try {
+            logger.log(`[CLICK] Using exact selector: ${createReelSelector}`);
+            
+            // Wait for the button to appear
+            await this.page.waitForSelector(createReelSelector, { timeout: 10000 });
+            
+            // Click using multiple methods for reliability
+            await this.page.evaluate((selector) => {
+                const button = document.querySelector(selector);
+                if (button) {
+                    // Method 1: Direct click
+                    button.click();
+                    
+                    // Method 2: Dispatch mouse event for React
+                    const event = new MouseEvent('click', {
+                        view: window,
+                        bubbles: true,
+                        cancelable: true,
+                        buttons: 1
+                    });
+                    button.dispatchEvent(event);
+                    
+                    return true;
+                }
+                return false;
+            }, createReelSelector);
+            
+            logger.success('✅ Create Reel button clicked via data-surface selector');
+            
+        } catch (error) {
+            logger.error(`[ERROR] Failed to find Create Reel button: ${error.message}`);
+            await debugCapture(this.page, folderName, 'CREATE_REEL_NOT_FOUND', this.config);
+            throw new Error('Create Reel button not found on page');
+        }
+        
+        // WAIT: Intelligently wait for Reel composer/modal to fully load
+        await this.waitForReelComposerToLoad(folderName, 15);
+        
+        // Additional delay for UI stabilization
+        await randomDelay();
+        
         await debugCapture(this.page, folderName, STEPS.CLICK_CREATE_REEL, this.config);
 
         // STEP 3 & 4: Set up file chooser, click "Add Video", and upload
@@ -308,94 +414,7 @@ class MetaReelsUploader {
         await debugCapture(this.page, folderName, STEPS.CONFIRM_POSTED, this.config);
     }
 
-    /**
-     * Execute the complete CREATE POST workflow
-     * For videos >= 90 seconds
-     */
-    async executePostWorkflow(folderName, videoPath, caption) {
-        // Build dynamic URL with page ID from config
-        const metaBusinessUrl = this.config.facebookPageId
-            ? `https://business.facebook.com/latest/home?asset_id=${this.config.facebookPageId}`
-            : this.config.metaBusinessUrl;
 
-        // STEP 1: Navigate to Meta Business Suite
-        logger.step('STEP POST 1: Opening Meta Business Suite...');
-        await this.page.goto(metaBusinessUrl, {
-            waitUntil: 'networkidle2',
-            timeout: 60000
-        });
-        await randomDelay();
-        await debugCapture(this.page, folderName, POST_STEPS.OPEN_BUSINESS_SUITE, this.config);
-
-        // STEP 2: Click "Create Post"
-        logger.step('STEP POST 2: Clicking "Create Post" button...');
-        await clickCreatePost(this.page, this.config.maxRetries);
-        await this.page.waitForTimeout(2000);
-        await debugCapture(this.page, folderName, POST_STEPS.CLICK_CREATE_POST, this.config);
-
-        // STEP 3: Open "Add video" dropdown
-        logger.step('STEP POST 3: Opening "Add video" dropdown...');
-        await openAddVideoDropdown(this.page, this.config.maxRetries);
-        await this.page.waitForTimeout(1000);
-        await debugCapture(this.page, folderName, POST_STEPS.CLICK_ADD_VIDEO_DROPDOWN, this.config);
-
-        // STEP 4 & 5: Upload video using multi-strategy system
-        logger.step('STEP POST 4 & 5: Uploading video with multi-strategy system...');
-        
-        // Use the new multi-strategy upload system
-        // This will attempt 6 different upload strategies in order:
-        // 1. FileChooser API with real mouse clicks
-        // 2. Find <input type="file"> in main DOM
-        // 3. Search all iframes for file inputs
-        // 4. Shadow DOM deep search
-        // 5. Drag-and-drop upload simulation
-        // 6. Emergency file input injection
-        await uploadVideoInMetaPostWorkflow(this.page, videoPath, this.config);
-        
-        await randomDelay();
-        await debugCapture(this.page, folderName, POST_STEPS.UPLOAD_VIDEO, this.config);
-
-        // STEP 6 is now handled by uploadVideoInMetaPostWorkflow (includes upload completion monitoring)
-        
-        // STEP 7: Fill caption (posts may have different caption field)
-        logger.step('STEP POST 7: Filling caption...');
-        try {
-            // Try using the same caption handler as Reels
-            await applyCaptionWithRetry(this.page, caption, 3);
-        } catch (captionError) {
-            logger.warn(`[POST] Standard caption method failed: ${captionError.message}`);
-            logger.log('[POST] Trying direct textarea method...');
-            
-            // Fallback: find textarea and fill it
-            await this.page.evaluate((captionText) => {
-                const textareas = [...document.querySelectorAll('textarea')];
-                if (textareas.length > 0) {
-                    const textarea = textareas[0];
-                    textarea.value = captionText;
-                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                    textarea.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }, caption);
-            
-            logger.success('[POST] ✅ Caption filled (fallback method)');
-        }
-        await debugCapture(this.page, folderName, POST_STEPS.FILL_CAPTION, this.config);
-
-        // STEP 8: Fill optional Title/Description fields if they exist
-        logger.step('STEP POST 8: Checking for optional Title/Description fields...');
-        await fillOptionalTitleDescription(this.page, caption);
-        await debugCapture(this.page, folderName, POST_STEPS.FILL_OPTIONAL_FIELDS, this.config);
-
-        // STEP 9: Click Publish button
-        logger.step('STEP POST 9: Clicking "Publish" button...');
-        await clickPublishButton(this.page, this.config.maxRetries);
-        await debugCapture(this.page, folderName, POST_STEPS.CLICK_PUBLISH, this.config);
-
-        // STEP 10: Wait for publish confirmation
-        logger.step('STEP POST 10: Waiting for publish confirmation...');
-        await waitForPublishConfirmation(this.page);
-        await debugCapture(this.page, folderName, POST_STEPS.CONFIRM_PUBLISHED, this.config);
-    }
 
     /**
      * Upload video file via file chooser or file input

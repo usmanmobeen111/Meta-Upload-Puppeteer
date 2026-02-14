@@ -5,132 +5,233 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Meta Reels Automation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
-  <div class="container">
-    <!-- Header -->
-    <header>
-      <h1>📱 Meta Reels Automation</h1>
-      <p>Upload videos to Meta Business Suite using AdsPower profiles</p>
-    </header>
-
-    <!-- Configuration Section -->
-    <section class="config-section">
-      <h2>⚙️ Configuration</h2>
-      <div class="config-grid">
-        <div class="config-item">
-          <label for="apiKey">AdsPower API Key:</label>
-          <input type="text" id="apiKey" placeholder="Enter API key">
-        </div>
-        <div class="config-item">
-          <label for="profileId">Profile ID:</label>
-          <input type="text" id="profileId" placeholder="Enter profile ID">
-        </div>
-        <div class="config-item">
-          <label for="pageId">Facebook Page ID / Asset ID:</label>
-          <input type="text" id="pageId" placeholder="Enter page ID (e.g., 909735605565623)">
-        </div>
-        <div class="config-item">
-          <label>
-            <input type="checkbox" id="debugMode">
-            Debug Mode (captures screenshots & DOM at each step)
-          </label>
-        </div>
-        <div class="config-item">
-          <button id="saveConfig" class="btn btn-primary">Save Config</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- Folder Selection -->
-    <section class="folder-section">
-      <h2>📁 Root Folder</h2>
-      <div class="folder-controls">
-        <button id="selectFolder" class="btn btn-primary">Select Root Folder</button>
-        <span id="selectedFolder" class="folder-path">No folder selected</span>
-      </div>
-    </section>
-
-    <!-- Bulk Controls -->
-    <section class="controls-section">
-      <div class="bulk-controls">
-        <button id="postAll" class="btn btn-success">Post All Unposted</button>
-        <button id="refresh" class="btn btn-secondary">Refresh</button>
-        <button id="stop" class="btn btn-danger">Stop Current Process</button>
-      </div>
-    </section>
-
-    <!-- Video Table -->
-    <section class="table-section">
-      <h2>🎬 Videos</h2>
-      <div class="table-container">
-        <table id="videoTable">
-          <thead>
-            <tr>
-              <th>Folder Name</th>
-              <th>Video File</th>
-              <th>Caption Preview</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="videoTableBody">
-            <tr>
-              <td colspan="5" class="empty-state">No videos found. Select a root folder to get started.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Status Display -->
-    <section class="status-section">
-      <h2>📊 Status</h2>
-      <div class="status-grid">
-        <div class="status-item">
-          <strong>Current Action:</strong>
-          <span id="currentAction">Idle</span>
-        </div>
-        <div class="status-item">
-          <strong>Current Folder:</strong>
-          <span id="currentFolder">-</span>
-        </div>
-        <div class="status-item">
-          <strong>Random Delay:</strong>
-          <span id="randomDelay">-</span>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+            <rect width="40" height="40" rx="10" fill="url(#gradient)"/>
+            <path d="M20 10L28 15V25L20 30L12 25V15L20 10Z" fill="white" opacity="0.9"/>
+            <defs>
+              <linearGradient id="gradient" x1="0" y1="0" x2="40" y2="40">
+                <stop offset="0%" stop-color="#00d9ff"/>
+                <stop offset="100%" stop-color="#e94560"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <span>Meta Reels Automation</span>
         </div>
       </div>
 
-      <!-- Logs Console -->
-      <div class="logs-container">
-        <h3>Console Logs</h3>
-        <div id="logsConsole" class="logs-output"></div>
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-section="settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 1v6m0 6v6m8.66-10l-5.2 3m-2.92 0L7.34 8m13.32 12l-5.2-3m-2.92 0L7.34 16"></path>
+          </svg>
+          <span>Settings</span>
+        </button>
+        <button class="nav-item" data-section="upload">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5-5-5 5m5-5v12"></path>
+          </svg>
+          <span>Upload Queue</span>
+        </button>
+        <button class="nav-item" data-section="logs">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <polyline points="4 7 4 4 20 4 20 7"></polyline>
+            <line x1="9" y1="20" x2="15" y2="20"></line>
+            <line x1="12" y1="4" x2="12" y2="20"></line>
+          </svg>
+          <span>Logs</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="openDebugFolder" class="debug-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"></path>
+          </svg>
+          <span>Open Debug Folder</span>
+        </button>
       </div>
-    </section>
+    </aside>
 
-    <!-- Footer -->
-    <footer>
-      <p>Built with Electron + Puppeteer + AdsPower</p>
-    </footer>
-  </div>
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Settings Section -->
+      <section id="settings" class="content-section active">
+        <div class="section-header">
+          <h1>⚙️ Configuration</h1>
+          <p>Configure your AdsPower and Meta Business Suite settings</p>
+        </div>
 
-  <div class="x3nfvp2 x193iq5w xxymvpz xeuugli x2lah0s" role="none">
-    <div aria-busy="false"
-      class="x1i10hfl xjqpnuy xc5r6h4 xqeqjp1 x1phubyo x972fbf x10w94by x1qhh985 x14e42zd x9f619 x1ypdohk x3ct3a4 xdj266r x14z9mp xat24cr x1lziwak x2lwn1j xeuugli x16tdsg8 xggy1nq x1ja2u2z x1t137rt x6s0dn4 x1ejq31n x18oe1m7 x1sy0etr xstzfhl x3nfvp2 xdl72j9 x1q0g3np x2lah0s x193iq5w x1n2onr6 x1hl2dhg x87ps6o xxymvpz xlh3980 xvmahel x1lku1pv x1g40iwv x1g2r6go x16e9yqp x12w9bfk x15406qy xjwep3j x1t39747 x1wcsgtt x1pczhz8 xo1l8bm x140t73q x19bke7z x1y1aw1k xwib8y2 xf7dkkf xv54qhq"
-      role="button" tabindex="0"><span
-        class="x1vvvo52 x1fvot60 xxio538 x1heor9g xq9mrsl x1h4wwuj x1pd3egz xeuugli xh8yej3">
-        <div class="x78zum5">
-          <div
-            class="x6s0dn4 x78zum5 x1q0g3np xozqiw3 x2lwn1j xeuugli x1iyjqo2 x8va1my x1hc1fzr x13dflua x6o7n8i xxziih7 x12w9bfk xl56j7k xh8yej3">
-            <div class="x1vvvo52 x1fvot60 xk50ysn xxio538 x1heor9g xuxw1ft x6ikm8r x10wlt62 xlyipyv x1h4wwuj xeuugli">
-              Share</div>
+        <div class="card">
+          <div class="config-grid">
+            <div class="form-group">
+              <label for="apiKey">AdsPower API Key</label>
+              <input type="text" id="apiKey" placeholder="Enter your AdsPower API key">
+            </div>
+
+            <div class="form-group">
+              <label for="profileId">AdsPower Profile ID</label>
+              <input type="text" id="profileId" placeholder="Enter your profile ID">
+            </div>
+
+            <div class="form-group">
+              <label for="pageId">Facebook Page ID</label>
+              <input type="text" id="pageId" placeholder="Enter Facebook Page/Asset ID">
+              <small>This will be used to construct the Meta Business Suite URL</small>
+            </div>
+
+            <div class="form-group">
+              <label for="uploadFolder">Upload Folder Path</label>
+              <div class="input-group">
+                <input type="text" id="uploadFolder" placeholder="C:/Users/YourName/Desktop/Uploads" readonly>
+                <button id="selectFolder" class="btn-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input type="checkbox" id="debugMode">
+                <span>Debug Mode (capture screenshots at each step)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button id="saveConfig" class="btn btn-primary">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+              </svg>
+              Save Configuration
+            </button>
+            <button id="testConnection" class="btn btn-secondary">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+              </svg>
+              Test AdsPower Connection
+            </button>
           </div>
         </div>
-      </span></div>
-  </div>
+      </section>
 
+      <!-- Upload Queue Section -->
+      <section id="upload" class="content-section">
+        <div class="section-header">
+          <h1>🎬 Upload Queue</h1>
+          <p>Manage your reel uploads</p>
+        </div>
+
+        <div class="action-bar">
+          <button id="scanFolder" class="btn btn-primary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="M21 21l-4.35-4.35"></path>
+            </svg>
+            Scan Upload Folder
+          </button>
+          <button id="postAll" class="btn btn-success">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M5 12h14M12 5l7 7-7 7"></path>
+            </svg>
+            Post All Unposted Reels
+          </button>
+          <button id="stopProcess" class="btn btn-danger">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            </svg>
+            Stop Upload Process
+          </button>
+        </div>
+
+        <!-- Progress Card -->
+        <div id="progressCard" class="card progress-card" style="display: none;">
+          <div class="progress-header">
+            <h3>Upload in Progress</h3>
+            <span id="progressStatus" class="status-badge processing">Processing...</span>
+          </div>
+          <div class="progress-info">
+            <div class="progress-item">
+              <label>Current Video:</label>
+              <span id="currentVideo">-</span>
+            </div>
+            <div class="progress-item">
+              <label>Current Step:</label>
+              <span id="currentStep">-</span>
+            </div>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar">
+              <div id="progressBar" class="progress-fill" style="width: 0%"></div>
+            </div>
+            <span id="progressPercent" class="progress-text">0%</span>
+          </div>
+        </div>
+
+        <!-- Video Queue Table -->
+        <div class="card">
+          <div class="table-container">
+            <table class="video-table">
+              <thead>
+                <tr>
+                  <th>Folder Name</th>
+                  <th>Video File</th>
+                  <th>Caption Preview</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="videoTableBody">
+                <tr class="empty-state">
+                  <td colspan="5">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"></path>
+                    </svg>
+                    <p>No videos found. Select a folder and scan to get started.</p>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Logs Section -->
+      <section id="logs" class="content-section">
+        <div class="section-header">
+          <h1>📊 Live Logs</h1>
+          <p>Real-time automation logs and status updates</p>
+          <button id="clearLogs" class="btn btn-secondary btn-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+            </svg>
+            Clear Logs
+          </button>
+        </div>
+
+        <div class="card logs-card">
+          <div id="logsContainer" class="logs-terminal"></div>
+        </div>
+      </section>
+    </main>
+  </div>
 
   <script src="renderer.js"></script>
 </body>

@@ -5,6 +5,9 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "dev": "electron .",
+    "build": "electron-builder",
+    "dist": "electron-builder --win --x64",
     "test": "echo \"No tests configured\" && exit 0"
   },
   "keywords": [
@@ -24,5 +27,41 @@
     "puppeteer": "^21.11.0",
     "puppeteer-core": "^21.11.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.meta.reels.automation",
+    "productName": "Meta Reels Automation",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "files": [
+      "**/*",
+      "!python_ui/**",
+      "!debug/**",
+      "!logs/**",
+      "!dist/**",
+      "!node_modules/.cache/**",
+      "!.git/**",
+      "!.gemini/**"
+    ]
+  }
 }

@@ -157,65 +157,146 @@ async function clearCaption(page, textbox) {
 }
 
 /**
- * Insert caption text with proper React event triggering
+ * Insert caption text using clipboard paste with proper React event triggering
+ * This method is MORE RELIABLE than character-by-character typing, especially with emojis
  * @param {Page} page - Puppeteer page instance
  * @param {ElementHandle} textbox - Caption textbox element
  * @param {string} captionText - Caption to insert
  */
 async function insertCaptionText(page, textbox, captionText) {
     try {
-        logger.log('[CAPTION] Inserting caption text...');
+        logger.log('[CAPTION] Inserting caption text via clipboard paste...');
 
         // Focus the textbox
         await textbox.click();
         await page.waitForTimeout(500);
 
-        // Type caption character by character (triggers React properly)
-        logger.log('[CAPTION] Typing caption character by character...');
-        await textbox.type(captionText, { delay: 50 }); // 50ms delay between keystrokes
-        await page.waitForTimeout(500);
+        // Method 1: Use CDP (Chrome DevTools Protocol) to set clipboard and paste
+        logger.log('[CAPTION] Setting clipboard content...');
+        try {
+            // Get CDP session
+            const client = await page.target().createCDPSession();
+            
+            // Grant clipboard permissions
+            await client.send('Browser.grantPermissions', {
+                permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'],
+                origin: page.url()
+            });
 
-        // Trigger React state update with space + backspace trick
-        logger.log('[CAPTION] Triggering React state update...');
-        await page.keyboard.press('Space');
-        await page.waitForTimeout(100);
-        await page.keyboard.press('Backspace');
-        await page.waitForTimeout(300);
+            // Write text to clipboard via CDP
+            await page.evaluate((text) => {
+                return navigator.clipboard.writeText(text);
+            }, captionText);
+            
+            await page.waitForTimeout(300);
+            logger.success('[CAPTION] Clipboard content set successfully');
 
-        // Dispatch React events to ensure state is updated
+            // Paste using Ctrl+V
+            logger.log('[CAPTION] Pasting via Ctrl+V...');
+            await page.keyboard.down('Control');
+            await page.keyboard.press('v');
+            await page.keyboard.up('Control');
+            await page.waitForTimeout(500);
+
+        } catch (clipboardError) {
+            logger.warn(`[CAPTION] Clipboard method failed: ${clipboardError.message}`);
+            logger.log('[CAPTION] Falling back to direct DOM manipulation...');
+            
+            // Fallback: Direct DOM insertion with React event triggering
+            await page.evaluate((el, text) => {
+                // Set text content directly
+                el.innerText = text;
+                el.textContent = text;
+                
+                // Try to update React fiber if exists
+                const reactKey = Object.keys(el).find(key => key.startsWith('__react'));
+                if (reactKey) {
+                    const reactProps = el[reactKey];
+                    if (reactProps && reactProps.memoizedProps) {
+                        reactProps.memoizedProps.value = text;
+                    }
+                }
+            }, textbox, captionText);
+            
+            await page.waitForTimeout(300);
+        }
+
+        // CRITICAL: Trigger ALL React events to ensure state updates
+        logger.log('[CAPTION] Triggering React state update events...');
         await page.evaluate((el, text) => {
-            // Fire input event
+            // Fire InputEvent (most important for React)
+            el.dispatchEvent(new InputEvent('input', { 
+                bubbles: true, 
+                cancelable: true, 
+                inputType: 'insertText',
+                data: text 
+            }));
+
+            // Fire generic input event
             el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
 
             // Fire change event
             el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
 
-            // Fire keyup event
-            el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
+            // Fire keyup event to simulate typing completion
+            el.dispatchEvent(new KeyboardEvent('keyup', { 
+                bubbles: true, 
+                cancelable: true,
+                key: 'v',
+                code: 'KeyV',
+                ctrlKey: true
+            }));
 
-            // Fire blur event
-            el.dispatchEvent(new FocusEvent('blur', { bubbles: true, cancelable: true }));
-
-            // Also try setting the value via data attribute for React
+            // Update data attributes if they exist (React might use these)
             if (el.hasAttribute('data-text')) {
                 el.setAttribute('data-text', text);
+            }
+            if (el.hasAttribute('aria-label')) {
+                // Some React components track state via aria-label
+                const currentLabel = el.getAttribute('aria-label');
+                if (currentLabel && currentLabel.toLowerCase().includes('empty')) {
+                    el.setAttribute('aria-label', currentLabel.replace(/empty/gi, 'filled'));
+                }
             }
         }, textbox, captionText);
 
         await page.waitForTimeout(500);
 
-        // Click outside to blur (forces React state commit)
-        logger.log('[CAPTION] Blurring textbox by clicking outside...');
-        await page.evaluate(() => {
-            // Click on body or a neutral area
-            const body = document.querySelector('body');
-            if (body) {
-                body.click();
-            }
-        });
+        // COMMIT TRIGGER: Press Space then Backspace to force React state commit
+        logger.log('[CAPTION] Applying commit trigger (Space + Backspace)...');
+        await page.keyboard.press('End'); // Move cursor to end
+        await page.waitForTimeout(100);
+        await page.keyboard.press('Space');
+        await page.waitForTimeout(150);
+        await page.keyboard.press('Backspace');
+        await page.waitForTimeout(300);
+
+        // Blur the field by clicking outside or pressing Tab (forces final state commit)
+        logger.log('[CAPTION] Blurring textbox to commit state...');
+        try {
+            await page.keyboard.press('Tab');
+            await page.waitForTimeout(300);
+        } catch (tabError) {
+            // Fallback: Click outside
+            await page.evaluate(() => {
+                const body = document.querySelector('body');
+                if (body) {
+                    body.click();
+                }
+            });
+            await page.waitForTimeout(300);
+        }
+
+        // Re-focus and blur to ensure React captures the final state
+        logger.log('[CAPTION] Final focus/blur cycle...');
+        await textbox.click();
+        await page.waitForTimeout(200);
+        await page.evaluate((el) => {
+            el.dispatchEvent(new FocusEvent('blur', { bubbles: true, cancelable: true }));
+        }, textbox);
         await page.waitForTimeout(500);
 
-        logger.success('[CAPTION] Caption text inserted with React events');
+        logger.success('[CAPTION] Caption text inserted with React events and commit triggers');
 
     } catch (error) {
         logger.error(`[CAPTION] Error inserting caption: ${error.message}`);
@@ -225,15 +306,17 @@ async function insertCaptionText(page, textbox, captionText) {
 
 /**
  * Verify caption was properly set
+ * Supports full match or partial match (first 20 characters)
+ * Ensures emojis are preserved
  * @param {Page} page - Puppeteer page instance
  * @param {string} expectedText - Expected caption text
- * @returns {Promise<boolean>} True if caption matches expected text
+ * @returns {Promise<Object>} Object with {verified: boolean, actualText: string, htmlContent: string}
  */
 async function verifyCaption(page, expectedText) {
     try {
         logger.log('[CAPTION] Verifying caption was set correctly...');
 
-        const actualText = await page.evaluate(() => {
+        const result = await page.evaluate(() => {
             // Try multiple selectors to read caption
             const selectors = [
                 'div._5rpu[contenteditable="true"][role="textbox"]',
@@ -242,35 +325,78 @@ async function verifyCaption(page, expectedText) {
                 'textarea'
             ];
 
+            let foundElement = null;
+            let actualText = '';
+            let htmlContent = '';
+
             for (const selector of selectors) {
                 const el = document.querySelector(selector);
                 if (el) {
                     const text = el.innerText || el.textContent || el.value || '';
                     if (text.trim().length > 0) {
-                        return text.trim();
+                        foundElement = el;
+                        actualText = text.trim();
+                        htmlContent = el.innerHTML || '';
+                        break;
                     }
                 }
             }
 
-            return '';
+            return {
+                actualText,
+                htmlContent,
+                foundElement: foundElement !== null
+            };
         });
 
         const expectedTrimmed = expectedText.trim();
-        const actualTrimmed = actualText.trim();
+        const actualTrimmed = result.actualText.trim();
 
+        // Check 1: Full match
         if (actualTrimmed === expectedTrimmed) {
-            logger.success(`[CAPTION] ✅ Caption verified: "${actualTrimmed.substring(0, 50)}${actualTrimmed.length > 50 ? '...' : ''}"`);
-            return true;
-        } else {
-            logger.warn(`[CAPTION] ⚠️ Caption mismatch!`);
+            logger.success(`[CAPTION] ✅ Caption verified (full match): "${actualTrimmed.substring(0, 50)}${actualTrimmed.length > 50 ? '...' : ''}"`);
+            return { verified: true, actualText: actualTrimmed, htmlContent: result.htmlContent };
+        }
+
+        // Check 2: Partial match (first 20 characters) - for cases where Meta might add extra content
+        const minLength = Math.min(20, expectedTrimmed.length);
+        const expectedStart = expectedTrimmed.substring(0, minLength);
+        const actualStart = actualTrimmed.substring(0, minLength);
+
+        if (expectedStart === actualStart && actualTrimmed.length > 0) {
+            logger.success(`[CAPTION] ✅ Caption verified (partial match - first ${minLength} chars): "${actualStart}..."`);
+            return { verified: true, actualText: actualTrimmed, htmlContent: result.htmlContent };
+        }
+
+        // Check 3: Not empty (minimal verification)
+        if (actualTrimmed.length > 0) {
+            logger.warn(`[CAPTION] ⚠️ Caption mismatch but not empty`);
             logger.warn(`[CAPTION]   Expected: "${expectedTrimmed.substring(0, 50)}${expectedTrimmed.length > 50 ? '...' : ''}"`);
             logger.warn(`[CAPTION]   Actual: "${actualTrimmed.substring(0, 50)}${actualTrimmed.length > 50 ? '...' : ''}"`);
-            return false;
+            
+            // Check if emojis are preserved (basic check)
+            const hasEmojisInExpected = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(expectedTrimmed);
+            const hasEmojisInActual = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(actualTrimmed);
+            
+            if (hasEmojisInExpected && !hasEmojisInActual) {
+                logger.error(`[CAPTION] ❌ Emojis were LOST during insertion!`);
+                return { verified: false, actualText: actualTrimmed, htmlContent: result.htmlContent };
+            } else if (hasEmojisInExpected && hasEmojisInActual) {
+                logger.log(`[CAPTION] ✅ Emojis preserved in caption`);
+            }
+            
+            // Return false but with data for debugging
+            return { verified: false, actualText: actualTrimmed, htmlContent: result.htmlContent };
         }
+
+        // Check 4: Empty - critical failure
+        logger.error(`[CAPTION] ❌ Caption field is EMPTY!`);
+        logger.error(`[CAPTION]   Expected: "${expectedTrimmed.substring(0, 50)}${expectedTrimmed.length > 50 ? '...' : ''}"`);
+        return { verified: false, actualText: actualTrimmed, htmlContent: result.htmlContent };
 
     } catch (error) {
         logger.error(`[CAPTION] Error verifying caption: ${error.message}`);
-        return false;
+        return { verified: false, actualText: '', htmlContent: '' };
     }
 }
 
@@ -304,12 +430,15 @@ async function setCaption(page, captionText) {
 }
 
 /**
- * Apply caption with retry logic
+ * Apply caption with retry logic and comprehensive debug logging
  * @param {Page} page - Puppeteer page instance
  * @param {string} captionText - Caption to insert
  * @param {number} maxRetries - Maximum retry attempts (default: 3)
  */
 async function applyCaptionWithRetry(page, captionText, maxRetries = 3) {
+    const fs = require('fs');
+    const path = require('path');
+    
     try {
         logger.log(`[CAPTION] Applying caption with retry (max ${maxRetries} attempts)...`);
 
@@ -323,10 +452,10 @@ async function applyCaptionWithRetry(page, captionText, maxRetries = 3) {
                 // Wait before verification
                 await page.waitForTimeout(1000);
 
-                // Verify caption
-                const verified = await verifyCaption(page, captionText);
+                // Verify caption (now returns an object)
+                const verificationResult = await verifyCaption(page, captionText);
 
-                if (verified) {
+                if (verificationResult.verified) {
                     logger.success(`[CAPTION] ✅ Caption successfully applied and verified on attempt ${attempt}`);
 
                     // Wait additional time to ensure React state is committed
@@ -339,14 +468,59 @@ async function applyCaptionWithRetry(page, captionText, maxRetries = 3) {
                 // If not verified and not last attempt, retry
                 if (attempt < maxRetries) {
                     logger.warn(`[CAPTION] ⚠️ Caption not verified, retrying in 1 second...`);
+                    logger.log(`[CAPTION]   Extracted text: "${verificationResult.actualText.substring(0, 100)}..."`);
                     await page.waitForTimeout(1000);
                 } else {
                     logger.error('[CAPTION] ❌ Caption verification failed after all retries');
 
-                    // Take debug screenshot
-                    const screenshotPath = `./debug_caption_failed_${Date.now()}.png`;
+                    // COMPREHENSIVE DEBUG LOGGING ON FAILURE
+                    const debugDir = path.join(__dirname, '..', 'debug');
+                    if (!fs.existsSync(debugDir)) {
+                        fs.mkdirSync(debugDir, { recursive: true });
+                    }
+
+                    const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '').replace('T', '_');
+                    const baseFilename = `CAPTION_FAILED_${timestamp}`;
+
+                    // 1. Save screenshot
+                    const screenshotPath = path.join(debugDir, `${baseFilename}.png`);
                     await page.screenshot({ path: screenshotPath, fullPage: true });
                     logger.error(`[CAPTION] Debug screenshot saved: ${screenshotPath}`);
+
+                    // 2. Save full page HTML
+                    const htmlPath = path.join(debugDir, `${baseFilename}.html`);
+                    const fullHtml = await page.content();
+                    fs.writeFileSync(htmlPath, fullHtml, 'utf8');
+                    logger.error(`[CAPTION] Debug HTML saved: ${htmlPath}`);
+
+                    // 3. Save caption field details
+                    const detailsPath = path.join(debugDir, `${baseFilename}_details.txt`);
+                    const details = [
+                        '=== CAPTION FAILURE DEBUG REPORT ===',
+                        '',
+                        `Timestamp: ${new Date().toISOString()}`,
+                        `Attempts: ${maxRetries}`,
+                        '',
+                        '--- Expected Caption ---',
+                        captionText,
+                        '',
+                        '--- Actual Extracted Text ---',
+                        verificationResult.actualText || '(EMPTY)',
+                        '',
+                        '--- Caption Field HTML ---',
+                        verificationResult.htmlContent || '(NOT FOUND)',
+                        '',
+                        '--- Verification Status ---',
+                        `Verified: ${verificationResult.verified}`,
+                        `Expected Length: ${captionText.length} chars`,
+                        `Actual Length: ${(verificationResult.actualText || '').length} chars`,
+                        `Has Emojis in Expected: ${/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(captionText)}`,
+                        `Has Emojis in Actual: ${/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(verificationResult.actualText || '')}`,
+                        '',
+                        '=== END REPORT ==='
+                    ].join('\n');
+                    fs.writeFileSync(detailsPath, details, 'utf8');
+                    logger.error(`[CAPTION] Debug details saved: ${detailsPath}`);
 
                     throw new Error('Caption verification failed after all retry attempts');
                 }

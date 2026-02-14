@@ -1,164 +1,279 @@
 /**
- * Renderer Process JavaScript
- * Handles GUI interactions and communication with main process
+ * Renderer Process - Enhanced UI Controller
+ * Handles all frontend interactions, progress tracking, and log streaming
  */
 
 let currentFolder = null;
 let videos = [];
 let config = {};
 
+// State Management
+const state = {
+  currentSection: 'settings',
+  isProcessing: false,
+  currentVideo: null,
+  currentStep: null,
+  progress: 0
+};
+
 // Initialize on load
 window.addEventListener('DOMContentLoaded', async () => {
-    await loadConfig();
-    setupEventListeners();
-    setupIPCListeners();
-    addLog('Application started');
+  await loadConfig();
+  setupNavigation();
+  setupEventListeners();
+  setupIPCListeners();
+  addLog('info', 'Application initialized successfully');
 });
 
 /**
  * Load configuration from main process
  */
 async function loadConfig() {
+  try {
     config = await window.electronAPI.getConfig();
 
     if (config) {
-        document.getElementById('apiKey').value = config.adspowerApiKey || '';
-        document.getElementById('profileId').value = config.adspowerProfileId || '';
-        document.getElementById('pageId').value = config.facebookPageId || '';
-        document.getElementById('debugMode').checked = config.debugMode || false;
+      document.getElementById('apiKey').value = config.adspowerApiKey || '';
+      document.getElementById('profileId').value = config.adspowerProfileId || '';
+      document.getElementById('pageId').value = config.facebookPageId || '';
+      document.getElementById('uploadFolder').value = config.uploadFolderPath || '';
+      document.getElementById('debugMode').checked = config.debugMode || false;
     }
+  } catch (error) {
+    addLog('error', `Failed to load config: ${error.message}`);
+  }
 }
 
 /**
- * Setup event listeners for buttons
+ * Setup sidebar navigation
+ */
+function setupNavigation() {
+  const navItems = document.querySelectorAll('.nav-item');
+
+  navItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const section = item.dataset.section;
+
+      // Update nav active state
+      navItems.forEach(nav => nav.classList.remove('active'));
+      item.classList.add('active');
+
+      // Update content sections
+      document.querySelectorAll('.content-section').forEach(sec => {
+        sec.classList.remove('active');
+      });
+      document.getElementById(section).classList.add('active');
+
+      state.currentSection = section;
+    });
+  });
+}
+
+/**
+ * Setup event listeners for all interactive elements
  */
 function setupEventListeners() {
-    // Save config
-    document.getElementById('saveConfig').addEventListener('click', async () => {
-        config.adspowerApiKey = document.getElementById('apiKey').value;
-        config.adspowerProfileId = document.getElementById('profileId').value;
-        config.facebookPageId = document.getElementById('pageId').value;
-        config.debugMode = document.getElementById('debugMode').checked;
+  // Save Config
+  document.getElementById('saveConfig').addEventListener('click', async () => {
+    const newConfig = {
+      ...config,
+      adspowerApiKey: document.getElementById('apiKey').value,
+      adspowerProfileId: document.getElementById('profileId').value,
+      facebookPageId: document.getElementById('pageId').value,
+      uploadFolderPath: document.getElementById('uploadFolder').value,
+      debugMode: document.getElementById('debugMode').checked
+    };
 
-        const result = await window.electronAPI.updateConfig(config);
+    const result = await window.electronAPI.updateConfig(newConfig);
 
-        if (result) {
-            addLog('✅ Configuration saved successfully');
-            showNotification('Config saved!', 'success');
-        } else {
-            addLog('❌ Failed to save configuration');
-            showNotification('Failed to save config', 'error');
-        }
-    });
+    if (result) {
+      config = newConfig;
+      addLog('success', 'Configuration saved successfully');
+      showNotification('Config saved!', 'success');
+    } else {
+      addLog('error', 'Failed to save configuration');
+      showNotification('Failed to save config', 'error');
+    }
+  });
 
-    // Select folder
-    document.getElementById('selectFolder').addEventListener('click', async () => {
-        const folderPath = await window.electronAPI.selectFolder();
+  // Select Folder
+  document.getElementById('selectFolder').addEventListener('click', async () => {
+    const folderPath = await window.electronAPI.selectFolder();
 
-        if (folderPath) {
-            currentFolder = folderPath;
-            document.getElementById('selectedFolder').textContent = folderPath;
-            addLog(`📁 Selected folder: ${folderPath}`);
-            await scanFolders();
-        }
-    });
+    if (folderPath) {
+      document.getElementById('uploadFolder').value = folderPath;
+      currentFolder = folderPath;
+      addLog('info', `Selected upload folder: ${folderPath}`);
+    }
+  });
 
-    // Refresh
-    document.getElementById('refresh').addEventListener('click', async () => {
-        if (currentFolder) {
-            await scanFolders();
-        } else {
-            showNotification('Please select a folder first', 'warning');
-        }
-    });
+  // Test AdsPower Connection
+  document.getElementById('testConnection').addEventListener('click', async () => {
+    addLog('info', 'Testing AdsPower connection...');
+    // This could be implemented to test the connection
+    showNotification('Test connection feature coming soon!', 'info');
+  });
 
-    // Post all unposted
-    document.getElementById('postAll').addEventListener('click', async () => {
-        const unposted = videos.filter(v => !v.isPosted);
+  // Scan Folder
+  document.getElementById('scanFolder').addEventListener('click', async () => {
+    if (!currentFolder) {
+      const folderPath = document.getElementById('uploadFolder').value;
+      if (folderPath) {
+        currentFolder = folderPath;
+      } else {
+        showNotification('Please select a folder first', 'warning');
+        return;
+      }
+    }
 
-        if (unposted.length === 0) {
-            showNotification('No unposted videos found', 'warning');
-            return;
-        }
+    await scanFolders();
+  });
 
-        if (!confirm(`Post ${unposted.length} video(s)?`)) {
-            return;
-        }
+  // Post All Unposted
+  document.getElementById('postAll').addEventListener('click', async () => {
+    const unposted = videos.filter(v => !v.isPosted);
 
-        addLog(`🚀 Starting bulk upload for ${unposted.length} videos...`);
+    if (unposted.length === 0) {
+      showNotification('No unposted videos found', 'warning');
+      return;
+    }
 
-        const result = await window.electronAPI.postBulk(unposted);
+    if (!confirm(`Post ${unposted.length} video(s)?`)) {
+      return;
+    }
 
-        if (result.success) {
-            addLog(`✅ Bulk upload completed`);
-            await scanFolders(); // Refresh table
-        } else {
-            addLog(`❌ Bulk upload error: ${result.error}`);
-        }
-    });
+    addLog('info', `Starting bulk upload for ${unposted.length} videos...`);
 
-    // Stop process
-    document.getElementById('stop').addEventListener('click', async () => {
-        await window.electronAPI.stopProcess();
-        addLog('⚠️ Process stopped by user');
-        showNotification('Process stopped', 'warning');
-    });
+    const result = await window.electronAPI.postBulk(unposted);
+
+    if (result.success) {
+      addLog('success', `Bulk upload completed: ${result.results.filter(r => r.success).length}/${result.results.length} successful`);
+      await scanFolders(); // Refresh table
+    } else {
+      addLog('error', `Bulk upload error: ${result.error}`);
+    }
+  });
+
+  // Stop Process
+  document.getElementById('stopProcess').addEventListener('click', async () => {
+    await window.electronAPI.stopProcess();
+    addLog('warn', 'Process stop requested by user');
+    showNotification('Process stopped', 'warning');
+    hideProgress();
+  });
+
+  // Open Debug Folder
+  document.getElementById('openDebugFolder').addEventListener('click', async () => {
+    const debugPath = config.debugFolderPath || 'debug';
+    await window.electronAPI.openFolder(debugPath);
+    addLog('info', 'Opened debug folder');
+  });
+
+  // Clear Logs
+  document.getElementById('clearLogs').addEventListener('click', () => {
+    document.getElementById('logsContainer').innerHTML = '';
+    addLog('info', 'Logs cleared');
+  });
 }
 
 /**
- * Setup IPC listeners for status updates and logs
+ * Setup IPC listeners for status updates, logs, and progress
  */
 function setupIPCListeners() {
-    // Listen for status updates
-    window.electronAPI.onStatusUpdate((data) => {
-        document.getElementById('currentAction').textContent = data.action || 'Idle';
-        document.getElementById('currentFolder').textContent = data.folder || '-';
-        addLog(data.message);
-    });
+  // Listen for status updates
+  window.electronAPI.onStatusUpdate((data) => {
+    if (data.action) {
+      addLog('step', data.message || data.action);
+    }
 
-    // Listen for log messages
-    window.electronAPI.onLogMessage((message) => {
-        addLog(message);
+    if (data.folder) {
+      updateProgress({
+        currentVideo: data.folder,
+        currentStep: data.action
+      });
+    }
+  });
+
+  // Listen for log messages
+  window.electronAPI.onLogMessage((message) => {
+    // Parse log level from message
+    let level = 'info';
+    if (message.includes('✅') || message.toLowerCase().includes('success')) {
+      level = 'success';
+    } else if (message.includes('❌') || message.toLowerCase().includes('error') || message.toLowerCase().includes('failed')) {
+      level = 'error';
+    } else if (message.includes('⚠️') || message.toLowerCase().includes('warn')) {
+      level = 'warn';
+    } else if (message.toLowerCase().includes('step')) {
+      level = 'step';
+    }
+
+    addLog(level, message);
+  });
+
+  // Listen for progress updates (if implemented)
+  if (window.electronAPI.onProgressUpdate) {
+    window.electronAPI.onProgressUpdate((data) => {
+      updateProgress(data);
     });
+  }
 }
 
 /**
  * Scan folders for videos
  */
 async function scanFolders() {
-    addLog('🔍 Scanning folders...');
+  addLog('info', 'Scanning upload folder...');
 
+  try {
     const result = await window.electronAPI.scanFolders(currentFolder);
 
     if (result.success) {
-        videos = result.folders;
-        renderVideoTable();
-        addLog(`✅ Found ${videos.length} video(s)`);
+      videos = result.folders;
+      renderVideoTable();
+      addLog('success', `Found ${videos.length} video folder(s)`);
+
+      // Switch to upload section if not there
+      if (state.currentSection !== 'upload') {
+        document.querySelector('.nav-item[data-section="upload"]').click();
+      }
     } else {
-        addLog(`❌ Scan error: ${result.error}`);
-        showNotification(`Scan error: ${result.error}`, 'error');
+      addLog('error', `Scan error: ${result.error}`);
+      showNotification(`Scan error: ${result.error}`, 'error');
     }
+  } catch (error) {
+    addLog('error', `Scan failed: ${error.message}`);
+  }
 }
 
 /**
  * Render video table
  */
 function renderVideoTable() {
-    const tbody = document.getElementById('videoTableBody');
-    tbody.innerHTML = '';
+  const tbody = document.getElementById('videoTableBody');
+  tbody.innerHTML = '';
 
-    if (videos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No videos found in this folder.</td></tr>';
-        return;
-    }
+  if (videos.length === 0) {
+    tbody.innerHTML = `
+      <tr class="empty-state">
+        <td colspan="5">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"></path>
+          </svg>
+          <p>No videos found in this folder.</p>
+        </td>
+      </tr>
+    `;
+    return;
+  }
 
-    videos.forEach((video, index) => {
-        const row = document.createElement('tr');
+  videos.forEach((video, index) => {
+    const row = document.createElement('tr');
 
-        row.innerHTML = `
-      <td>${video.folderName}</td>
-      <td>${video.videoFile}</td>
-      <td class="caption-preview">${video.captionPreview || '(no caption)'}</td>
+    row.innerHTML = `
+      <td>${escapeHtml(video.folderName)}</td>
+      <td>${escapeHtml(video.videoFile)}</td>
+      <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(video.captionPreview || '(no caption)')}</td>
       <td>
         <span class="status-badge ${video.isPosted ? 'posted' : 'not-posted'}">
           ${video.isPosted ? '✅ Posted' : '⏳ Not Posted'}
@@ -169,73 +284,143 @@ function renderVideoTable() {
           Post
         </button>
         <button class="btn btn-sm btn-secondary" onclick="openVideoFolder(${index})">
-          Open Folder
+          Open
         </button>
       </td>
     `;
 
-        tbody.appendChild(row);
-    });
+    tbody.appendChild(row);
+  });
 }
 
 /**
  * Post a single video
  */
 async function postSingleVideo(index) {
-    const video = videos[index];
+  const video = videos[index];
 
-    if (!confirm(`Post video from "${video.folderName}"?`)) {
-        return;
-    }
+  if (!confirm(`Post reel from "${video.folderName}"?`)) {
+    return;
+  }
 
-    addLog(`🚀 Starting upload for: ${video.folderName}`);
+  addLog('info', `Starting upload for: ${video.folderName}`);
+  showProgress();
+  updateProgress({
+    currentVideo: video.folderName,
+    currentStep: 'Initializing...',
+    percentage: 0
+  });
 
-    const result = await window.electronAPI.postVideo(video);
+  const result = await window.electronAPI.postVideo(video);
 
-    if (result.success) {
-        addLog(`✅ Successfully posted: ${video.folderName}`);
-        showNotification('Video posted successfully!', 'success');
-        await scanFolders(); // Refresh table
-    } else {
-        addLog(`❌ Failed to post: ${result.error}`);
-        showNotification(`Post failed: ${result.error}`, 'error');
-    }
+  if (result.success) {
+    addLog('success', `Successfully posted: ${video.folderName}`);
+    showNotification('Video posted successfully!', 'success');
+    hideProgress();
+    await scanFolders(); // Refresh table
+  } else {
+    addLog('error', `Failed to post: ${result.error}`);
+    showNotification(`Post failed: ${result.error}`, 'error');
+    hideProgress();
+  }
 }
 
 /**
  * Open video folder in file explorer
  */
 async function openVideoFolder(index) {
-    const video = videos[index];
-    await window.electronAPI.openFolder(video.folderPath);
+  const video = videos[index];
+  await window.electronAPI.openFolder(video.folderPath);
 }
 
 /**
- * Add log message to console
+ * Show progress card
  */
-function addLog(message) {
-    const logsConsole = document.getElementById('logsConsole');
-    const timestamp = new Date().toLocaleTimeString();
-    const logEntry = document.createElement('div');
-    logEntry.className = 'log-entry';
-    logEntry.textContent = `[${timestamp}] ${message}`;
-    logsConsole.appendChild(logEntry);
-
-    // Auto-scroll to bottom
-    logsConsole.scrollTop = logsConsole.scrollHeight;
-
-    // Limit to last 100 messages
-    while (logsConsole.children.length > 100) {
-        logsConsole.removeChild(logsConsole.firstChild);
-    }
+function showProgress() {
+  document.getElementById('progressCard').style.display = 'block';
+  state.isProcessing = true;
 }
 
 /**
- * Show notification
+ * Hide progress card
+ */
+function hideProgress() {
+  document.getElementById('progressCard').style.display = 'none';
+  state.isProcessing = false;
+  updateProgress({
+    currentVideo: '-',
+    currentStep: '-',
+    percentage: 0
+  });
+}
+
+/**
+ * Update progress display
+ * @param {Object} data - { currentVideo, currentStep, percentage }
+ */
+function updateProgress(data) {
+  if (data.currentVideo) {
+    document.getElementById('currentVideo').textContent = data.currentVideo;
+    state.currentVideo = data.currentVideo;
+  }
+
+  if (data.currentStep) {
+    document.getElementById('currentStep').textContent = data.currentStep;
+    state.currentStep = data.currentStep;
+  }
+
+  if (typeof data.percentage === 'number') {
+    const percentage = Math.min(100, Math.max(0, data.percentage));
+    document.getElementById('progressBar').style.width = `${percentage}%`;
+    document.getElementById('progressPercent').textContent = `${Math.round(percentage)}%`;
+    state.progress = percentage;
+  }
+}
+
+/**
+ * Add log message to terminal
+ * @param {string} level - info|success|error|warn|step
+ * @param {string} message - Log message
+ */
+function addLog(level, message) {
+  const logsContainer = document.getElementById('logsContainer');
+  const timestamp = new Date().toLocaleTimeString();
+
+  const logEntry = document.createElement('div');
+  logEntry.className = 'log-entry';
+
+  logEntry.innerHTML = `
+    <span class="log-timestamp">${timestamp}</span>
+    <span class="log-level ${level}">${level}</span>
+    <span class="log-message">${escapeHtml(message)}</span>
+  `;
+
+  logsContainer.appendChild(logEntry);
+
+  // Auto-scroll to bottom
+  logsContainer.scrollTop = logsContainer.scrollHeight;
+
+  // Limit to last 500 messages
+  while (logsContainer.children.length > 500) {
+    logsContainer.removeChild(logsContainer.firstChild);
+  }
+}
+
+/**
+ * Show notification banner (simple implementation)
  */
 function showNotification(message, type = 'info') {
-    // Simple alert for now - can be enhanced with a custom notification system
-    addLog(`[${type.toUpperCase()}] ${message}`);
+  // For now, just log it
+  addLog(type, `[NOTIFICATION] ${message}`);
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // Make functions globally available for onclick handlers
