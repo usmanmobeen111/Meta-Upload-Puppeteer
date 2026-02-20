@@ -1,5 +1,10 @@
 # Dependencies
 node_modules/
+dist/
+
+resources/bin/ffprobe.exe
+resources/bin/ffmpeg.exe
+
 
 # Logs
 logs/

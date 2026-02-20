@@ -5,8 +5,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getVideoDuration } = require('./videoDuration');
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.mkv', '.webm', '.avi'];
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+
+// Duration threshold for classification (in seconds)
+const REEL_MAX_DURATION = 90;
 
 /**
  * Check if a folder has been marked as posted
@@ -41,6 +46,14 @@ function findVideoFile(folderPath) {
         const files = fs.readdirSync(folderPath);
 
         for (const file of files) {
+            const filePath = path.join(folderPath, file);
+            const stat = fs.statSync(filePath);
+            
+            // Skip directories (especially 'posted'/'Posted' folder)
+            if (stat.isDirectory()) {
+                continue;
+            }
+            
             const ext = path.extname(file).toLowerCase();
             if (VIDEO_EXTENSIONS.includes(ext)) {
                 return file;
@@ -73,11 +86,40 @@ function readCaption(folderPath) {
 }
 
 /**
+ * Classify content type based on file type and duration
+ * @param {string} filePath - Path to media file
+ * @param {number|null} duration - Video duration in seconds (null if not video or detection failed)
+ * @returns {string} Content type: 'reel', 'post', or 'photo'
+ */
+function classifyContentType(filePath, duration) {
+    const ext = path.extname(filePath).toLowerCase();
+    
+    // Check if it's an image file
+    if (IMAGE_EXTENSIONS.includes(ext)) {
+        return 'photos';
+    }
+    
+    // It's a video file
+    if (duration === null) {
+        // Duration detection failed - default to reels
+        console.log(`[SCANNER] Duration unknown for ${path.basename(filePath)}, defaulting to reels`);
+        return 'reels';
+    }
+    
+    // Classify by duration threshold
+    if (duration < REEL_MAX_DURATION) {
+        return 'reels';
+    } else {
+        return 'posts';
+    }
+}
+
+/**
  * Scan root folder for video subfolders
  * @param {string} rootPath - Path to root folder
- * @returns {Array} Array of folder objects
+ * @returns {Promise<Array>} Array of folder objects
  */
-function scanFolders(rootPath) {
+async function scanFolders(rootPath) {
     const results = [];
 
     try {
@@ -108,15 +150,36 @@ function scanFolders(rootPath) {
             // Check posted status
             const isPosted = checkIfPosted(itemPath);
 
+            // Get video path
+            const videoPath = path.join(itemPath, videoFile);
+
+            // Detect video duration
+            let duration = null;
+            let contentType = 'reel'; // Default fallback
+            
+            try {
+                duration = await getVideoDuration(videoPath);
+                contentType = classifyContentType(videoPath, duration);
+                
+                if (duration !== null) {
+                    console.log(`[SCANNER] ${item}: ${duration.toFixed(1)}s → ${contentType}`);
+                }
+            } catch (durationError) {
+                console.warn(`[SCANNER] Could not detect duration for ${item}: ${durationError.message}`);
+                // contentType remains 'reel' as default
+            }
+
             // Add to results
             results.push({
                 folderName: item,
                 folderPath: itemPath,
                 videoFile: videoFile,
-                videoPath: path.join(itemPath, videoFile),
+                videoPath: videoPath,
                 caption: caption,
                 captionPreview: caption.substring(0, 50) + (caption.length > 50 ? '...' : ''),
-                isPosted: isPosted
+                isPosted: isPosted,
+                contentType: contentType,  // NEW: reel, post, or photo
+                duration: duration  // NEW: duration in seconds (or null)
             });
         }
 

@@ -16,7 +16,8 @@ const {
     clickButtonWithSVG,
     waitForPageLoad,
     waitForUploadComplete,
-    pasteTextWithEmojis
+    pasteTextWithEmojis,
+    clickElementByText
 } = require('./helpers');
 const AdsPowerClient = require('./adsPowerClient');
 const { applyCaptionWithRetry } = require('./captionHandler');
@@ -291,10 +292,12 @@ class MetaReelsUploader {
         await randomDelay();
         await debugCapture(this.page, folderName, STEPS.OPEN_BUSINESS_SUITE, this.config);
         
+        
         // CAPTURE HTML for debugging Create Reel button
         logger.log('[DEBUG] Capturing page HTML for Create Reel button analysis...');
         const html = await this.page.content();
-        const debugDir = path.join(__dirname, '..', 'debug');
+        const { getDebugPath } = require('../utils/debugCapture');
+        const debugDir = getDebugPath();
         if (!fs.existsSync(debugDir)) {
             fs.mkdirSync(debugDir, { recursive: true });
         }
@@ -358,12 +361,26 @@ class MetaReelsUploader {
         logger.log('[UPLOAD] Setting up file chooser listener...');
         const fileChooserPromise = this.page.waitForFileChooser({ timeout: 10000 });
 
-        // Now click the Add Video button
-        logger.log('[UPLOAD] Clicking Add Video button via SVG icon...');
-        await clickButtonWithSVG(
+        // Now click the Add Video button using the NUCLEAR CLICK ENGINE
+        // Works across all Meta profiles regardless of DOM structure or random class names
+        logger.log('[UPLOAD] Clicking Add Video button via Nuclear Click Engine...');
+        await clickElementByText(
             this.page,
-            'M21.382 4.026C21.154 2.79 20.056 2',
-            'Add Video'
+            [
+                'Add Video',
+                'Add video',
+                'Add Photo/Video',
+                'Add Video/Photo',
+                'Add media',
+                'Upload video',
+                'Upload from desktop'
+            ],
+            'Add Video',
+            {
+                // "photo" is a negative keyword ONLY when it appears alone without "video"
+                negativeKeywords: ['story', 'live', 'event', 'album'],
+                contextSelectors: ['nav', 'aside', '[role="navigation"]', '[role="banner"]']
+            }
         );
 
         // Wait for the file chooser to appear
@@ -493,7 +510,8 @@ class MetaReelsUploader {
             try {
                 const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '').replace('T', '_');
                 const fs = require('fs');
-                const debugDir = path.join(__dirname, '..', 'debug_screenshots');
+                const { getDebugPath } = require('../utils/debugCapture');
+                const debugDir = path.join(getDebugPath(), 'screenshots');
 
                 if (!fs.existsSync(debugDir)) {
                     fs.mkdirSync(debugDir, { recursive: true });

@@ -36,8 +36,25 @@ async function getVideoDuration(videoPath) {
     return new Promise((resolve) => {
         logger.log(`[DURATION] Detecting video duration: ${videoPath}`);
 
+        // Determine FFprobe path based on whether app is packaged
+        let ffprobePath = 'ffprobe'; // Default: use system FFprobe
+        
+        // Check if running in Electron and if app is packaged
+        try {
+            const { app } = require('electron');
+            if (app.isPackaged) {
+                // Use bundled FFprobe from resources
+                const path = require('path');
+                ffprobePath = path.join(process.resourcesPath, 'bin', 'ffprobe.exe');
+                logger.log(`[DURATION] Using bundled FFprobe: ${ffprobePath}`);
+            }
+        } catch (err) {
+            // Not running in Electron main process or app not available
+            // Fall back to system FFprobe
+        }
+
         // Spawn FFprobe process
-        const ffprobe = spawn('ffprobe', [
+        const ffprobe = spawn(ffprobePath, [
             '-v', 'error',
             '-show_entries', 'format=duration',
             '-of', 'default=noprint_wrappers=1:nokey=1',
@@ -55,7 +72,43 @@ async function getVideoDuration(videoPath) {
             errorOutput += data.toString();
         });
 
+        let timeoutId = null;
+        let resolved = false;
+
+        const cleanup = () => {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            try {
+                if (ffprobe && !ffprobe.killed) {
+                    ffprobe.kill('SIGKILL');
+                }
+            } catch (err) {
+                // Process already dead, ignore
+            }
+        };
+
+        ffprobe.on('error', (err) => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            
+            // This typically happens when FFprobe is not installed
+            if (err.code === 'ENOENT') {
+                logger.warn('[DURATION] ⚠️ FFprobe not installed. Install FFmpeg to enable auto-routing.');
+                logger.warn('[DURATION] Defaulting to Reel workflow for all videos.');
+            } else {
+                logger.warn(`[DURATION] Error running FFprobe: ${err.message}`);
+            }
+            resolve(null);
+        });
+
         ffprobe.on('close', (code) => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            
             if (code === 0 && output.trim()) {
                 const duration = parseFloat(output.trim());
                 if (!isNaN(duration)) {
@@ -80,20 +133,11 @@ async function getVideoDuration(videoPath) {
             }
         });
 
-        ffprobe.on('error', (err) => {
-            // This typically happens when FFprobe is not installed
-            if (err.code === 'ENOENT') {
-                logger.warn('[DURATION] ⚠️ FFprobe not installed. Install FFmpeg to enable auto-routing.');
-                logger.warn('[DURATION] Defaulting to Reel workflow for all videos.');
-            } else {
-                logger.warn(`[DURATION] Error running FFprobe: ${err.message}`);
-            }
-            resolve(null);
-        });
-
         // Set timeout of 10 seconds
-        setTimeout(() => {
-            ffprobe.kill();
+        timeoutId = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
             logger.warn('[DURATION] FFprobe timeout, could not detect duration');
             resolve(null);
         }, 10000);

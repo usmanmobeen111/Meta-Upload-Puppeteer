@@ -1,23 +1,41 @@
 /**
  * Debug Capture Utility
  * Captures screenshots, HTML, and text at each automation step
+ * Uses Electron userData directory for debug storage
  */
 
+const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-// Ensure debug directories exist
-const debugDir = path.join(__dirname, '..', 'debug');
-const screenshotsDir = path.join(debugDir, 'screenshots');
-const htmlDir = path.join(debugDir, 'html');
-const textDir = path.join(debugDir, 'text');
-const errorsDir = path.join(debugDir, 'errors');
+/**
+ * Get debug directory path in userData
+ * @returns {string} Full path to debug directory
+ */
+function getDebugPath() {
+    const userDataPath = app.getPath('userData');
+    return path.join(userDataPath, 'debug');
+}
 
-[debugDir, screenshotsDir, htmlDir, textDir, errorsDir].forEach(dir => {
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-});
+/**
+ * Ensure debug directories exist
+ * Creates directories lazily when needed
+ */
+function ensureDebugDirectories() {
+    const debugDir = getDebugPath();
+    const screenshotsDir = path.join(debugDir, 'screenshots');
+    const htmlDir = path.join(debugDir, 'html');
+    const textDir = path.join(debugDir, 'text');
+    const errorsDir = path.join(debugDir, 'errors');
+
+    [debugDir, screenshotsDir, htmlDir, textDir, errorsDir].forEach(dir => {
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+    });
+
+    return { debugDir, screenshotsDir, htmlDir, textDir, errorsDir };
+}
 
 /**
  * Get formatted timestamp for filenames
@@ -58,6 +76,9 @@ async function debugCapture(page, folderName, stepName, config) {
     }
 
     try {
+        // Ensure directories exist before capturing
+        const { screenshotsDir, htmlDir, textDir } = ensureDebugDirectories();
+        
         const timestamp = getFileTimestamp();
         const sanitizedFolder = sanitizeFolderName(folderName);
         const baseFilename = `${timestamp}_${sanitizedFolder}_${stepName}`;
@@ -91,6 +112,9 @@ async function debugCapture(page, folderName, stepName, config) {
  */
 async function captureErrorEvidence(page, folderName, stepName, error) {
     try {
+        // Ensure directories exist before capturing
+        const { errorsDir } = ensureDebugDirectories();
+        
         const timestamp = getFileTimestamp();
         const sanitizedFolder = sanitizeFolderName(folderName);
         const baseFilename = `${timestamp}_${sanitizedFolder}_${stepName}_ERROR`;
@@ -128,5 +152,6 @@ async function captureErrorEvidence(page, folderName, stepName, error) {
 
 module.exports = {
     debugCapture,
-    captureErrorEvidence
+    captureErrorEvidence,
+    getDebugPath
 };

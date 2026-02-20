@@ -13,13 +13,19 @@ const state = {
   isProcessing: false,
   currentVideo: null,
   currentStep: null,
-  progress: 0
+  progress: 0,
+  currentTab: 'reels'  // NEW: Track active tab (reels, posts, photos)
 };
+
+// Flag to prevent concurrent scans
+let isScanning = false;
+
 
 // Initialize on load
 window.addEventListener('DOMContentLoaded', async () => {
   await loadConfig();
   setupNavigation();
+  setupTabSwitching();  // NEW: Setup tab switching for content types
   setupEventListeners();
   setupIPCListeners();
   addLog('info', 'Application initialized successfully');
@@ -67,6 +73,50 @@ function setupNavigation() {
       state.currentSection = section;
     });
   });
+}
+
+/**
+ * Setup tab switching for content types (Reels/Posts/Photos)
+ */
+function setupTabSwitching() {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+
+      // Update tab active state
+      tabBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      // Update state
+      state.currentTab = tab;
+
+      // Update button text
+      updatePostAllButtonText();
+
+      // Re-render table with filtered videos
+      renderVideoTable();
+
+      addLog('info', `Switched to ${tab} tab`);
+    });
+  });
+}
+
+/**
+ * Update "Post All" button text based on active tab
+ */
+function updatePostAllButtonText() {
+  const postAllText = document.getElementById('postAllText');
+  if (!postAllText) return;
+
+  if (state.currentTab === 'reels') {
+    postAllText.textContent = 'Post All Unposted Reels';
+  } else if (state.currentTab === 'posts') {
+    postAllText.textContent = 'Post All Unposted Posts';
+  } else if (state.currentTab === 'photos') {
+    postAllText.textContent = 'Post All Unposted Photos';
+  }
 }
 
 /**
@@ -129,20 +179,23 @@ function setupEventListeners() {
     await scanFolders();
   });
 
-  // Post All Unposted
+  // Post All Unposted (filtered by current tab)
   document.getElementById('postAll').addEventListener('click', async () => {
-    const unposted = videos.filter(v => !v.isPosted);
+    // Filter by current tab
+    const filteredVideos = videos.filter(v => v.contentType === state.currentTab);
+    const unposted = filteredVideos.filter(v => !v.isPosted);
 
     if (unposted.length === 0) {
-      showNotification('No unposted videos found', 'warning');
+      showNotification(`No unposted ${state.currentTab} found`, 'warning');
       return;
     }
 
-    if (!confirm(`Post ${unposted.length} video(s)?`)) {
+    const tabLabel = state.currentTab.charAt(0).toUpperCase() + state.currentTab.slice(1);
+    if (!confirm(`Post ${unposted.length} ${tabLabel.toLowerCase()}?`)) {
       return;
     }
 
-    addLog('info', `Starting bulk upload for ${unposted.length} videos...`);
+    addLog('info', `Starting bulk upload for ${unposted.length} ${tabLabel.toLowerCase()}...`);
 
     const result = await window.electronAPI.postBulk(unposted);
 
@@ -167,6 +220,12 @@ function setupEventListeners() {
     const debugPath = config.debugFolderPath || 'debug';
     await window.electronAPI.openFolder(debugPath);
     addLog('info', 'Opened debug folder');
+  });
+
+  // Open App Data Folder
+  document.getElementById('openAppDataFolder').addEventListener('click', async () => {
+    const result = await window.electronAPI.openAppDataFolder();
+    addLog('info', `Opened app data folder: ${result.path || 'userData'}`);
   });
 
   // Clear Logs
@@ -223,6 +282,13 @@ function setupIPCListeners() {
  * Scan folders for videos
  */
 async function scanFolders() {
+  // Prevent concurrent scans
+  if (isScanning) {
+    addLog('warn', 'Scan already in progress, please wait...');
+    return;
+  }
+
+  isScanning = true;
   addLog('info', 'Scanning upload folder...');
 
   try {
@@ -243,36 +309,68 @@ async function scanFolders() {
     }
   } catch (error) {
     addLog('error', `Scan failed: ${error.message}`);
+  } finally {
+    isScanning = false;
   }
 }
 
 /**
- * Render video table
+ * Render video table (filtered by current tab)
  */
 function renderVideoTable() {
   const tbody = document.getElementById('videoTableBody');
   tbody.innerHTML = '';
 
-  if (videos.length === 0) {
+  // Debug logging
+  console.log('[DEBUG] renderVideoTable called');
+  console.log('[DEBUG] Total videos:', videos.length);
+  console.log('[DEBUG] Current tab:', state.currentTab);
+  console.log('[DEBUG] Videos sample:', videos.slice(0, 2));
+  
+  // Show contentType values
+  if (videos.length > 0) {
+    console.log('[DEBUG] First video contentType:', videos[0].contentType, 'Type:', typeof videos[0].contentType);
+    console.log('[DEBUG] First video full object:', videos[0]);
+  }
+
+  // Filter videos by current tab
+  const filteredVideos = videos.filter(v => v.contentType === state.currentTab);
+  
+  console.log('[DEBUG] Filtered videos count:', filteredVideos.length);
+
+  if (filteredVideos.length === 0) {
+    const tabLabel = state.currentTab.charAt(0).toUpperCase() + state.currentTab.slice(1);
     tbody.innerHTML = `
       <tr class="empty-state">
-        <td colspan="5">
+        <td colspan="6">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"></path>
           </svg>
-          <p>No videos found in this folder.</p>
+          <p>No ${tabLabel.toLowerCase()} found in this folder.</p>
         </td>
       </tr>
     `;
     return;
   }
 
-  videos.forEach((video, index) => {
+  filteredVideos.forEach((video, index) => {
+    // Find original index in full videos array
+    const originalIndex = videos.findIndex(v => v.folderName === video.folderName);
+    
     const row = document.createElement('tr');
+
+    // Format duration
+    let durationText = '-';
+    if (video.duration !== null && video.duration !== undefined) {
+      const mins = Math.floor(video.duration / 60);
+      const secs = Math.floor(video.duration % 60);
+      durationText = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
 
     row.innerHTML = `
       <td>${escapeHtml(video.folderName)}</td>
       <td>${escapeHtml(video.videoFile)}</td>
+      <td><span class="duration-badge">${durationText}</span></td>
       <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(video.captionPreview || '(no caption)')}</td>
       <td>
         <span class="status-badge ${video.isPosted ? 'posted' : 'not-posted'}">
@@ -280,10 +378,10 @@ function renderVideoTable() {
         </span>
       </td>
       <td class="actions">
-        <button class="btn btn-sm btn-primary" onclick="postSingleVideo(${index})" ${video.isPosted ? 'disabled' : ''}>
+        <button class="btn btn-sm btn-primary" onclick="postSingleVideo(${originalIndex})" ${video.isPosted ? 'disabled' : ''}>
           Post
         </button>
-        <button class="btn btn-sm btn-secondary" onclick="openVideoFolder(${index})">
+        <button class="btn btn-sm btn-secondary" onclick="openVideoFolder(${originalIndex})">
           Open
         </button>
       </td>

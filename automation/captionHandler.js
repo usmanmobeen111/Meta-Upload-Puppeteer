@@ -438,6 +438,7 @@ async function setCaption(page, captionText) {
 async function applyCaptionWithRetry(page, captionText, maxRetries = 3) {
     const fs = require('fs');
     const path = require('path');
+    const { getDebugPath } = require('../utils/debugCapture');
     
     try {
         logger.log(`[CAPTION] Applying caption with retry (max ${maxRetries} attempts)...`);
@@ -474,7 +475,7 @@ async function applyCaptionWithRetry(page, captionText, maxRetries = 3) {
                     logger.error('[CAPTION] ❌ Caption verification failed after all retries');
 
                     // COMPREHENSIVE DEBUG LOGGING ON FAILURE
-                    const debugDir = path.join(__dirname, '..', 'debug');
+                    const debugDir = getDebugPath();
                     if (!fs.existsSync(debugDir)) {
                         fs.mkdirSync(debugDir, { recursive: true });
                     }

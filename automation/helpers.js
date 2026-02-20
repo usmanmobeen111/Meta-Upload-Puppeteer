@@ -214,7 +214,8 @@ async function clickButtonByText(page, text, retries = 3) {
                     const path = require('path');
 
                     // Ensure debug_screenshots directory exists
-                    const debugDir = path.join(__dirname, '..', 'debug_screenshots');
+                    const { getDebugPath } = require('../utils/debugCapture');
+                    const debugDir = path.join(getDebugPath(), 'screenshots');
                     if (!fs.existsSync(debugDir)) {
                         fs.mkdirSync(debugDir, { recursive: true });
                     }
@@ -786,6 +787,283 @@ async function fillOptionalTitleDescription(page, caption) {
     }
 }
 
+// ============================================================
+// 🔥 NUCLEAR CLICK ENGINE — Universal Add Video Button Finder
+// ============================================================
+
+/**
+ * Find the best-matching clickable element by visible text using a scoring algorithm.
+ * Works across all Meta profiles regardless of random class names.
+ *
+ * @param {Object} page - Puppeteer page
+ * @param {string[]} keywords - Array of text strings to match (case-insensitive)
+ * @param {Object} [options]
+ * @param {string[]} [options.negativeKeywords] - Words that reduce score if present
+ * @param {string[]} [options.contextSelectors]  - Ancestor selectors that reduce score (e.g. nav, aside)
+ * @returns {Promise<{element: ElementHandle|null, score: number, text: string}>}
+ */
+async function findClickableElementByText(page, keywords, options = {}) {
+    const {
+        negativeKeywords = ['photo', 'story', 'live', 'event', 'album'],
+        contextSelectors = ['nav', 'aside', 'header', '[role="navigation"]', '[role="banner"]']
+    } = options;
+
+    // Collect candidates + compute scores entirely inside the browser
+    const candidates = await page.evaluate(
+        (keywords, negativeKeywords, contextSelectors) => {
+            // --- helpers ---
+            function isVisible(el) {
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none') return false;
+                if (style.visibility === 'hidden') return false;
+                if (parseFloat(style.opacity) === 0) return false;
+                const rect = el.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) return false;
+                return true;
+            }
+
+            function isDisabled(el) {
+                if (el.disabled) return true;
+                if (el.getAttribute('aria-disabled') === 'true') return true;
+                return false;
+            }
+
+            function isInBadContext(el, contextSelectors) {
+                for (const sel of contextSelectors) {
+                    if (el.closest(sel)) return true;
+                }
+                return false;
+            }
+
+            function getVisibleText(el) {
+                const t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+                return t;
+            }
+
+            // --- collect raw candidates ---
+            const rawSelectors = [
+                '[role="button"]',
+                'button',
+                '[tabindex="0"]',
+                '[tabindex="1"]'
+            ];
+            const seen = new Set();
+            const all = [];
+            rawSelectors.forEach(sel => {
+                document.querySelectorAll(sel).forEach(el => {
+                    if (!seen.has(el)) {
+                        seen.add(el);
+                        all.push(el);
+                    }
+                });
+            });
+
+            // --- score each candidate ---
+            const results = [];
+            for (const el of all) {
+                if (!isVisible(el)) continue;
+                if (isDisabled(el)) continue;
+
+                const rawText = getVisibleText(el);
+                const lc = rawText.toLowerCase();
+
+                // Must contain at least one keyword to be considered
+                const matchedKeyword = keywords.find(kw => lc.includes(kw.toLowerCase()));
+                if (!matchedKeyword) continue;
+
+                let score = 0;
+                const lcKw = matchedKeyword.toLowerCase();
+
+                // Exact match
+                if (lc === lcKw) score += 100;
+                // Includes match
+                else if (lc.includes(lcKw)) score += 80;
+
+                // Bonus for "video" presence
+                if (lc.includes('video')) score += 50;
+
+                // Role/tag bonuses
+                if (el.getAttribute('role') === 'button') score += 30;
+                if (el.tagName === 'BUTTON') score += 20;
+                if (el.getAttribute('tabindex') !== null) score += 10;
+
+                // SVG child bonus (icon buttons)
+                if (el.querySelector('svg')) score += 10;
+
+                // Negative keyword penalties
+                for (const neg of negativeKeywords) {
+                    if (lc.includes(neg.toLowerCase()) && !lcKw.includes(neg.toLowerCase())) {
+                        score -= 100;
+                    }
+                }
+
+                // Bad context penalty
+                if (isInBadContext(el, contextSelectors)) score -= 200;
+
+                // Prefer shorter text (less likely to be a container)
+                if (rawText.length < 30) score += 20;
+                else if (rawText.length > 100) score -= 30;
+
+                results.push({
+                    score,
+                    text: rawText,
+                    tag: el.tagName,
+                    role: el.getAttribute('role') || '',
+                    tabindex: el.getAttribute('tabindex') || '',
+                    // We can't return the element handle from evaluate, so return a unique index
+                    index: Array.from(document.querySelectorAll('*')).indexOf(el)
+                });
+            }
+
+            // Sort descending by score
+            results.sort((a, b) => b.score - a.score);
+            return results;
+        },
+        keywords,
+        negativeKeywords,
+        contextSelectors
+    );
+
+    if (candidates.length === 0) {
+        return { element: null, score: 0, text: '' };
+    }
+
+    const best = candidates[0];
+    logger.log(`[NUCLEAR] Best candidate: score=${best.score}, tag=${best.tag}, role="${best.role}", text="${best.text.substring(0, 60)}"`);
+
+    // Get the actual ElementHandle using the DOM index
+    const elementHandle = await page.evaluateHandle((idx) => {
+        return Array.from(document.querySelectorAll('*'))[idx];
+    }, best.index);
+
+    return { element: elementHandle, score: best.score, text: best.text, allCandidates: candidates };
+}
+
+/**
+ * Find and click the Add Video button (or any button matching keywords) using the nuclear engine.
+ * Tries 5 click strategies with 3 retries.
+ *
+ * @param {Object} page - Puppeteer page
+ * @param {string[]} keywords - Text keywords to match
+ * @param {string} stepName - Label for logging/debug
+ * @param {Object} [options] - Passed to findClickableElementByText
+ * @returns {Promise<boolean>}
+ */
+async function clickElementByText(page, keywords, stepName = 'button', options = {}) {
+    const fs = require('fs');
+    const path = require('path');
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        logger.log(`[NUCLEAR] Attempt ${attempt}/${MAX_RETRIES}: Searching for "${stepName}"...`);
+        logger.log(`[NUCLEAR] Keywords: ${JSON.stringify(keywords)}`);
+
+        await page.waitForTimeout(1000);
+
+        const { element, score, text, allCandidates } = await findClickableElementByText(page, keywords, options);
+
+        if (!element || score < -50) {
+            logger.warn(`[NUCLEAR] No suitable element found (score=${score})`);
+
+            // Debug: log all candidates
+            if (allCandidates && allCandidates.length > 0) {
+                logger.log('[NUCLEAR] All candidates found:');
+                allCandidates.slice(0, 10).forEach((c, i) => {
+                    logger.log(`  [${i + 1}] score=${c.score} tag=${c.tag} role="${c.role}" text="${c.text.substring(0, 80)}"`);
+                });
+            } else {
+                logger.warn('[NUCLEAR] Zero candidates found on page.');
+            }
+
+            if (attempt === MAX_RETRIES) {
+                // Save debug evidence
+                try {
+                    const { getDebugPath } = require('../utils/debugCapture');
+                    const debugDir = getDebugPath();
+                    if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
+
+                    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+                    const ssPath = path.join(debugDir, `nuclear_fail_${stepName.replace(/\W/g, '_')}_${ts}.png`);
+                    await page.screenshot({ path: ssPath, fullPage: true });
+                    logger.error(`[NUCLEAR] Debug screenshot: ${ssPath}`);
+
+                    const htmlPath = path.join(debugDir, `nuclear_fail_${stepName.replace(/\W/g, '_')}_${ts}.html`);
+                    const html = await page.content();
+                    fs.writeFileSync(htmlPath, html, 'utf8');
+                    logger.error(`[NUCLEAR] Debug HTML: ${htmlPath}`);
+                } catch (dbgErr) {
+                    logger.warn(`[NUCLEAR] Could not save debug files: ${dbgErr.message}`);
+                }
+                throw new Error(`[NUCLEAR] "${stepName}" not found after ${MAX_RETRIES} attempts`);
+            }
+
+            await page.waitForTimeout(2000);
+            continue;
+        }
+
+        logger.log(`[NUCLEAR] Found element (score=${score}): "${text.substring(0, 80)}"`);
+
+        // --- Click Strategy 1: scrollIntoView + hover + element.click() ---
+        try {
+            await page.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), element);
+            await page.waitForTimeout(400);
+            await element.hover();
+            await page.waitForTimeout(200);
+            await element.click();
+            logger.success(`[NUCLEAR] ✅ "${stepName}" clicked (Strategy 1: element.click)`);
+            await randomDelay();
+            return true;
+        } catch (e1) {
+            logger.warn(`[NUCLEAR] Strategy 1 failed: ${e1.message}`);
+        }
+
+        // --- Click Strategy 2: dispatchEvent sequence ---
+        try {
+            const dispatched = await page.evaluate((el) => {
+                try {
+                    el.scrollIntoView({ block: 'center' });
+                    ['mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'].forEach(evtName => {
+                        el.dispatchEvent(new MouseEvent(evtName, { bubbles: true, cancelable: true, view: window }));
+                    });
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            }, element);
+
+            if (dispatched) {
+                logger.success(`[NUCLEAR] ✅ "${stepName}" clicked (Strategy 2: dispatchEvent)`);
+                await randomDelay();
+                return true;
+            }
+        } catch (e2) {
+            logger.warn(`[NUCLEAR] Strategy 2 failed: ${e2.message}`);
+        }
+
+        // --- Click Strategy 3: Puppeteer mouse click via bounding box ---
+        try {
+            const box = await element.boundingBox();
+            if (box) {
+                const x = box.x + box.width / 2;
+                const y = box.y + box.height / 2;
+                await page.mouse.move(x, y);
+                await page.waitForTimeout(100);
+                await page.mouse.click(x, y);
+                logger.success(`[NUCLEAR] ✅ "${stepName}" clicked (Strategy 3: mouse.click at ${Math.round(x)},${Math.round(y)})`);
+                await randomDelay();
+                return true;
+            }
+        } catch (e3) {
+            logger.warn(`[NUCLEAR] Strategy 3 failed: ${e3.message}`);
+        }
+
+        logger.warn(`[NUCLEAR] All click strategies failed on attempt ${attempt}. Retrying...`);
+        await page.waitForTimeout(2000);
+    }
+
+    throw new Error(`[NUCLEAR] Failed to click "${stepName}" after ${MAX_RETRIES} attempts`);
+}
+
 module.exports = {
     clickButtonWithSVG,
     waitForPageLoad,
@@ -802,5 +1080,8 @@ module.exports = {
     waitForPostUploadComplete,
     clickPublishButton,
     waitForPublishConfirmation,
-    fillOptionalTitleDescription
+    fillOptionalTitleDescription,
+    // Nuclear click engine
+    findClickableElementByText,
+    clickElementByText
 };

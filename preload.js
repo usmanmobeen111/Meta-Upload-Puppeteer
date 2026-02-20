@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Open folder in explorer
     openFolder: (folderPath) => ipcRenderer.invoke('open-folder', folderPath),
 
+    // Open app data folder (userData)
+    openAppDataFolder: () => ipcRenderer.invoke('open-app-data-folder'),
+
     // Listen for status updates
     onStatusUpdate: (callback) => {
         ipcRenderer.on('status-update', (event, data) => callback(data));

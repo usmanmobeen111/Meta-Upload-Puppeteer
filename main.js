@@ -3,50 +3,22 @@
  * Entry point for the Electron application
  */
 
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const { scanFolders } = require('./utils/folderScanner');
 const MetaReelsUploader = require('./automation/uploader');
+const MetaPostUploader = require('./automation/postUploader');
 const logger = require('./utils/logger');
+const configManager = require('./utils/configManager');
+const { getDebugPath } = require('./utils/debugCapture');
+const { getLogsPath } = require('./utils/logger');
 
 let mainWindow;
 let uploader;
 let config;
 let isProcessing = false;
-
-/**
- * Load configuration from config.json
- */
-function loadConfig() {
-    try {
-        const configPath = path.join(__dirname, 'config.json');
-        const configData = fs.readFileSync(configPath, 'utf8');
-        config = JSON.parse(configData);
-        logger.log('Configuration loaded successfully');
-        return config;
-    } catch (error) {
-        logger.error(`Failed to load config: ${error.message}`);
-        return null;
-    }
-}
-
-/**
- * Save configuration to config.json
- */
-function saveConfig(newConfig) {
-    try {
-        const configPath = path.join(__dirname, 'config.json');
-        fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), 'utf8');
-        config = newConfig;
-        logger.success('Configuration saved successfully');
-        return true;
-    } catch (error) {
-        logger.error(`Failed to save config: ${error.message}`);
-        return false;
-    }
-}
 
 /**
  * Create main application window
@@ -75,7 +47,8 @@ function createWindow() {
 
 // App lifecycle
 app.whenReady().then(() => {
-    loadConfig();
+    // Load config from userData
+    config = configManager.loadConfig();
     createWindow();
 });
 
@@ -104,7 +77,11 @@ ipcMain.handle('get-config', async () => {
  * Update configuration
  */
 ipcMain.handle('update-config', async (event, newConfig) => {
-    return saveConfig(newConfig);
+    const success = configManager.saveConfig(newConfig);
+    if (success) {
+        config = newConfig;
+    }
+    return success;
 });
 
 /**
@@ -128,7 +105,7 @@ ipcMain.handle('select-folder', async () => {
 ipcMain.handle('scan-folders', async (event, rootPath) => {
     try {
         logger.log(`Scanning folders in: ${rootPath}`);
-        const folders = scanFolders(rootPath);
+        const folders = await scanFolders(rootPath); // Now async
         logger.success(`Found ${folders.length} video folders`);
         return { success: true, folders };
     } catch (error) {
@@ -138,7 +115,7 @@ ipcMain.handle('scan-folders', async (event, rootPath) => {
 });
 
 /**
- * Post single video
+ * Post single video (intelligently routes to Reels or Posts workflow)
  */
 ipcMain.handle('post-video', async (event, videoData) => {
     if (isProcessing) {
@@ -155,11 +132,20 @@ ipcMain.handle('post-video', async (event, videoData) => {
             message: 'Initializing...'
         });
 
-        // Create uploader instance
-        uploader = new MetaReelsUploader(config);
-
-        // Upload video
-        await uploader.uploadVideo(videoData);
+        // Determine which uploader to use based on contentType
+        const contentType = videoData.contentType || 'reels'; // Default to reels if not specified
+        
+        if (contentType === 'posts') {
+            // Use POST uploader
+            logger.log(`[ROUTER] Using POST workflow for: ${videoData.folderName}`);
+            uploader = new MetaPostUploader(config);
+            await uploader.uploadPost(videoData);
+        } else {
+            // Use REEL uploader (default)
+            logger.log(`[ROUTER] Using REEL workflow for: ${videoData.folderName}`);
+            uploader = new MetaReelsUploader(config);
+            await uploader.uploadVideo(videoData);
+        }
 
         isProcessing = false;
 
@@ -185,7 +171,7 @@ ipcMain.handle('post-video', async (event, videoData) => {
 });
 
 /**
- * Post multiple videos (bulk mode)
+ * Post multiple videos (bulk mode) - intelligently routes based on contentType
  */
 ipcMain.handle('post-bulk', async (event, videosArray) => {
     if (isProcessing) {
@@ -206,8 +192,16 @@ ipcMain.handle('post-bulk', async (event, videosArray) => {
             });
 
             try {
-                uploader = new MetaReelsUploader(config);
-                await uploader.uploadVideo(videoData);
+                const contentType = videoData.contentType || 'reels';
+                
+                if (contentType === 'posts') {
+                    uploader = new MetaPostUploader(config);
+                    await uploader.uploadPost(videoData);
+                } else {
+                    uploader = new MetaReelsUploader(config);
+                    await uploader.uploadVideo(videoData);
+                }
+                
                 results.push({ folderName: videoData.folderName, success: true });
             } catch (error) {
                 results.push({
@@ -246,22 +240,36 @@ ipcMain.handle('stop-process', async () => {
  * Open folder in file explorer
  */
 ipcMain.handle('open-folder', async (event, folderPath) => {
-    const { shell } = require('electron');
-    const path = require('path');
-    
-    // If no path provided or it's just "debug", use the debug folder from __dirname
     let targetPath = folderPath;
+    
+    // If no path provided or it's "debug", use the debug folder from userData
     if (!folderPath || folderPath === 'debug') {
-        targetPath = path.join(__dirname, 'debug');
+        targetPath = getDebugPath();
     }
     
-    // Create debug folder if it doesn't exist
+    // Create folder if it doesn't exist
     if (!fs.existsSync(targetPath)) {
         fs.mkdirSync(targetPath, { recursive: true });
     }
     
     shell.openPath(targetPath);
     return { success: true };
+});
+
+/**
+ * Open app data folder (userData directory)
+ */
+ipcMain.handle('open-app-data-folder', async () => {
+    const userDataPath = app.getPath('userData');
+    
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(userDataPath)) {
+        fs.mkdirSync(userDataPath, { recursive: true });
+    }
+    
+    shell.openPath(userDataPath);
+    logger.log(`Opened app data folder: ${userDataPath}`);
+    return { success: true, path: userDataPath };
 });
 
 // Forward logger output to renderer

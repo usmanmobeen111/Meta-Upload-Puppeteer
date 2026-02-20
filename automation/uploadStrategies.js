@@ -247,7 +247,8 @@ async function saveDebugDump(page, videoPath, error) {
             .replace('T', '_');
         
         const videoName = path.basename(videoPath, path.extname(videoPath));
-        const debugDir = path.join(__dirname, '..', 'debug', 'errors');
+        const { getDebugPath } = require('../utils/debugCapture');
+        const debugDir = path.join(getDebugPath(), 'errors');
         
         // Ensure directory exists
         if (!fs.existsSync(debugDir)) {

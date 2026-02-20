@@ -1,0 +1,3 @@
+# Ignore FFprobe binary (download separately, see resources/bin/README.md)
+resources/bin/ffprobe.exe
+resources/bin/ffmpeg.exe

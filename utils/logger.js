@@ -1,13 +1,24 @@
 /**
  * Centralized Logging Utility
  * Logs to console and file simultaneously
+ * Uses Electron userData directory for log storage
  */
 
+const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * Get logs directory path in userData
+ * @returns {string} Full path to logs directory
+ */
+function getLogsPath() {
+    const userDataPath = app.getPath('userData');
+    return path.join(userDataPath, 'logs');
+}
+
 // Ensure logs directory exists
-const logsDir = path.join(__dirname, '..', 'logs');
+const logsDir = getLogsPath();
 if (!fs.existsSync(logsDir)) {
     fs.mkdirSync(logsDir, { recursive: true });
 }
@@ -110,5 +121,6 @@ module.exports = {
     error,
     success,
     step,
-    getLogFilePath: () => logFilePath
+    getLogFilePath: () => logFilePath,
+    getLogsPath
 };
