@@ -9,12 +9,12 @@ let config = {};
 
 // State Management
 const state = {
-  currentSection: 'settings',
+  currentSection: 'upload',
   isProcessing: false,
   currentVideo: null,
   currentStep: null,
   progress: 0,
-  currentTab: 'reels'  // NEW: Track active tab (reels, posts, photos)
+  currentTab: 'reels'  // Track active tab (reels, posts, photos)
 };
 
 // Flag to prevent concurrent scans
@@ -56,23 +56,66 @@ async function loadConfig() {
 function setupNavigation() {
   const navItems = document.querySelectorAll('.nav-item');
 
-  navItems.forEach(item => {
-    item.addEventListener('click', () => {
-      const section = item.dataset.section;
+  // Section title map for the top bar breadcrumb
+  const sectionTitles = {
+    upload: 'Upload Queue',
+    logs:   'Live Logs',
+    settings: 'Configuration'
+  };
 
-      // Update nav active state
-      navItems.forEach(nav => nav.classList.remove('active'));
-      item.classList.add('active');
+  function navigateTo(section) {
+    // Update nav active state
+    navItems.forEach(nav => nav.classList.remove('active'));
+    const targetNav = document.querySelector(`.nav-item[data-section="${section}"]`);
+    if (targetNav) targetNav.classList.add('active');
 
-      // Update content sections
-      document.querySelectorAll('.content-section').forEach(sec => {
-        sec.classList.remove('active');
-      });
-      document.getElementById(section).classList.add('active');
-
-      state.currentSection = section;
+    // Update content sections
+    document.querySelectorAll('.content-section').forEach(sec => {
+      sec.classList.remove('active');
     });
+    document.getElementById(section).classList.add('active');
+
+    // Update top bar breadcrumb
+    const titleEl = document.getElementById('topBarTitle');
+    if (titleEl) titleEl.textContent = sectionTitles[section] || section;
+
+    // Update settings button active state
+    const settingsBtn = document.getElementById('topBarSettingsBtn');
+    if (settingsBtn) {
+      settingsBtn.classList.toggle('active', section === 'settings');
+    }
+
+    state.currentSection = section;
+  }
+
+  navItems.forEach(item => {
+    item.addEventListener('click', () => navigateTo(item.dataset.section));
   });
+
+  // Wire up top-bar Settings button
+  const topBarSettingsBtn = document.getElementById('topBarSettingsBtn');
+  if (topBarSettingsBtn) {
+    topBarSettingsBtn.addEventListener('click', () => {
+      if (state.currentSection === 'settings') {
+        // Toggle back to upload if already on settings
+        navigateTo('upload');
+      } else {
+        navigateTo('settings');
+      }
+    });
+  }
+
+  // Wrap content sections in a scrollable area
+  const mainContent = document.querySelector('.main-content');
+  const topBar = document.querySelector('.top-bar');
+  if (mainContent && topBar && !document.querySelector('.content-area')) {
+    const contentArea = document.createElement('div');
+    contentArea.className = 'content-area';
+    // Move all direct children after the top bar into the content-area
+    const children = Array.from(mainContent.children).filter(el => el !== topBar);
+    children.forEach(child => contentArea.appendChild(child));
+    mainContent.appendChild(contentArea);
+  }
 }
 
 /**

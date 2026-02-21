@@ -14,39 +14,39 @@
   --bg-tertiary: #16213e;
   --bg-card: rgba(26, 26, 46, 0.8);
   --bg-hover: rgba(255, 255, 255, 0.05);
-  
+
   /* Accent Colors */
   --accent-primary: #00d9ff;
   --accent-secondary: #e94560;
   --accent-success: #10b981;
   --accent-warning: #f59e0b;
   --accent-danger: #ef4444;
-  
+
   /* Text Colors */
   --text-primary: #f8f9fa;
   --text-secondary: #a0a0b0;
   --text-muted: #606070;
-  
+
   /* Border & Effects */
   --border-color: rgba(255, 255, 255, 0.1);
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 20px rgba(0, 217, 255, 0.3);
-  
+
   /* Spacing */
   --spacing-xs: 0.5rem;
   --spacing-sm: 1rem;
   --spacing-md: 1.5rem;
   --spacing-lg: 2rem;
   --spacing-xl: 3rem;
-  
+
   /* Border Radius */
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
   --radius-xl: 20px;
-  
+
   /* Transitions */
   --transition-fast: 150ms ease;
   --transition-base: 250ms ease;
@@ -191,25 +191,26 @@ body {
 
 .main-content {
   flex: 1;
-  overflow-y: auto;
-  padding: var(--spacing-xl);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: linear-gradient(135deg, #0a0a14 0%, #12121f 100%);
 }
 
-.main-content::-webkit-scrollbar {
+.content-area::-webkit-scrollbar {
   width: 8px;
 }
 
-.main-content::-webkit-scrollbar-track {
+.content-area::-webkit-scrollbar-track {
   background: var(--bg-secondary);
 }
 
-.main-content::-webkit-scrollbar-thumb {
+.content-area::-webkit-scrollbar-thumb {
   background: var(--accent-primary);
   border-radius: 4px;
 }
 
-.main-content::-webkit-scrollbar-thumb:hover {
+.content-area::-webkit-scrollbar-thumb:hover {
   background: var(--accent-secondary);
 }
 
@@ -227,6 +228,7 @@ body {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -510,9 +512,12 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.7;
   }
@@ -584,7 +589,7 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
   animation: shimmer 2s infinite;
 }
 
@@ -592,6 +597,7 @@ body {
   0% {
     transform: translateX(-100%);
   }
+
   100% {
     transform: translateX(100%);
   }
@@ -765,12 +771,169 @@ body {
   word-break: break-word;
 }
 
+/* ==================== TOP BAR ==================== */
+
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--spacing-xl);
+  height: 58px;
+  min-height: 58px;
+  background: rgba(15, 15, 30, 0.7);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.top-bar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+#topBarTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.3px;
+}
+
+.top-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.top-bar-settings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  white-space: nowrap;
+}
+
+.top-bar-settings-btn:hover {
+  background: rgba(0, 217, 255, 0.08);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  box-shadow: 0 0 16px rgba(0, 217, 255, 0.18);
+}
+
+.top-bar-settings-btn.active {
+  background: rgba(0, 217, 255, 0.12);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.top-bar-settings-btn svg {
+  transition: transform 0.4s ease;
+}
+
+.top-bar-settings-btn:hover svg {
+  transform: rotate(60deg);
+}
+
+/* Scrollable content area below top bar */
+.content-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-xl);
+}
+
+.content-area::-webkit-scrollbar {
+  width: 8px;
+}
+
+.content-area::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+.content-area::-webkit-scrollbar-thumb {
+  background: var(--accent-primary);
+  border-radius: 4px;
+}
+
+.content-area::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-secondary);
+}
+
+/* ==================== TAB BUTTONS ==================== */
+
+.upload-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--spacing-lg);
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  width: fit-content;
+}
+
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  white-space: nowrap;
+  position: relative;
+}
+
+.tab-btn svg {
+  opacity: 0.7;
+  transition: opacity var(--transition-base);
+}
+
+.tab-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+}
+
+.tab-btn:hover svg {
+  opacity: 1;
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.15), rgba(233, 69, 96, 0.1));
+  border-color: rgba(0, 217, 255, 0.35);
+  color: var(--accent-primary);
+  box-shadow: 0 0 18px rgba(0, 217, 255, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.tab-btn.active svg {
+  opacity: 1;
+}
+
+/* ==================== Responsive Design ==================== */
 /* Responsive Design */
 @media (max-width: 1024px) {
   .sidebar {
     width: 240px;
   }
-  
+
   .main-content {
     padding: var(--spacing-lg);
   }
@@ -780,25 +943,25 @@ body {
   .app-container {
     flex-direction: column;
   }
-  
+
   .sidebar {
     width: 100%;
     height: auto;
   }
-  
+
   .sidebar-nav {
     flex-direction: row;
     overflow-x: auto;
   }
-  
+
   .config-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .action-bar {
     flex-direction: column;
   }
-  
+
   .action-bar .btn {
     width: 100%;
   }

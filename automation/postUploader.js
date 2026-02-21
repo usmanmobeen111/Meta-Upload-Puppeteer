@@ -29,6 +29,7 @@ const POST_STEPS = {
     UPLOAD_VIDEO:        'POST_STEP_4_UPLOAD_VIDEO',
     PASTE_CAPTION:       'POST_STEP_5_PASTE_CAPTION',
     CLICK_PUBLISH:       'POST_STEP_6_CLICK_PUBLISH',
+    CLICK_SHARE:         'POST_STEP_6B_CLICK_SHARE',
     CONFIRM_POSTED:      'POST_STEP_7_CONFIRM_POSTED'
 };
 
@@ -217,11 +218,22 @@ class MetaPostUploader {
         await randomDelay();
         await debugCapture(this.page, folderName, POST_STEPS.PASTE_CAPTION, this.config);
 
-        // ── STEP 6: Click Publish ─────────────────────────────
-        logger.step('POST STEP 6: Clicking "Publish" button...');
-        await this.clickPublish();
-        await randomDelay();
-        await debugCapture(this.page, folderName, POST_STEPS.CLICK_PUBLISH, this.config);
+        // ── STEP 6: Detect mode & publish ─────────────────────
+        logger.step('POST STEP 6: Detecting publish mode (Reel vs Post)...');
+        const publishMode = await this.detectPublishMode();
+        logger.success(`[POST] Publish mode detected: ${publishMode}`);
+
+        if (publishMode === 'REEL') {
+            logger.log('[POST] → Reel mode detected → clicking "Share" button');
+            await this.clickShare();
+            await randomDelay();
+            await debugCapture(this.page, folderName, POST_STEPS.CLICK_SHARE, this.config);
+        } else {
+            logger.log('[POST] → Post mode detected → clicking "Publish" button');
+            await this.clickPublish();
+            await randomDelay();
+            await debugCapture(this.page, folderName, POST_STEPS.CLICK_PUBLISH, this.config);
+        }
 
         // ── STEP 7: Confirm success ───────────────────────────
         logger.step('POST STEP 7: Waiting for posting confirmation...');
@@ -651,7 +663,239 @@ class MetaPostUploader {
     }
 
     /**
-     * STEP 6 — Click Publish button
+     * STEP 6 — Detect whether Meta is in Reel mode (Share) or Post mode (Publish)
+     *
+     * Scans visible buttons for 'Share' or 'Publish' text after video upload.
+     * Returns 'REEL' if Share button found, 'POST' otherwise.
+     *
+     * @returns {Promise<'REEL'|'POST'>}
+     */
+    async detectPublishMode() {
+        try {
+            logger.log('[POST] Scanning for Share / Publish button to detect mode...');
+            await this.page.waitForTimeout(2000);
+
+            const mode = await this.page.evaluate(() => {
+                function getVisibleText(el) {
+                    return (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+                }
+
+                function isVisible(el) {
+                    const s = window.getComputedStyle(el);
+                    if (s.display === 'none' || s.visibility === 'hidden') return false;
+                    if (parseFloat(s.opacity) === 0) return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                }
+
+                const seen = new Set();
+                const labels = [];
+                ['[role="button"]', 'button'].forEach(sel => {
+                    document.querySelectorAll(sel).forEach(el => {
+                        if (!seen.has(el) && isVisible(el)) {
+                            seen.add(el);
+                            labels.push(getVisibleText(el).toLowerCase());
+                        }
+                    });
+                });
+
+                // 'Share' as an exact / near-exact button label wins over 'Publish'
+                const hasShare   = labels.some(t => t === 'share' || t === 'share reel' || t === 'share post');
+                const hasPublish = labels.some(t => t === 'publish' || t === 'post');
+
+                return { hasShare, hasPublish, labels };
+            });
+
+            logger.log(`[POST] detectPublishMode → hasShare=${mode.hasShare}, hasPublish=${mode.hasPublish}`);
+
+            if (mode.hasShare) {
+                return 'REEL';
+            }
+            // Default to POST (Publish button) if not ambiguous
+            return 'POST';
+
+        } catch (error) {
+            logger.warn(`[POST] detectPublishMode failed: ${error.message} — defaulting to POST mode`);
+            return 'POST';
+        }
+    }
+
+    /**
+     * STEP 6 (Reel branch) — Two-phase Share:
+     *
+     * Phase A: Click the navigation Share trigger at the top of the composer
+     *          (plain div with id="js_es", text "Share" — NOT role="button").
+     *          This navigates to the publish/review screen.
+     *
+     * Phase B: After the page transitions, click the FINAL Share button:
+     *          <div role="button" aria-busy="false" tabindex="0">…Share…</div>
+     *          This is the actual publish action.
+     */
+    async clickShare() {
+        try {
+            logger.log('[POST] clickShare — Phase A: clicking navigation Share trigger...');
+            await this.page.waitForTimeout(2000);
+
+            // ── PHASE A: Navigation Share ─────────────────────────────────────
+            // The first Share button is NOT a role="button" — it's a plain div
+            // identified by id="js_es" and/or visible text "Share" in the header.
+            // We use a broad page.evaluate scan so we don't miss it with XPath.
+
+            const phaseAClicked = await this.page.evaluate(() => {
+                function visibleText(el) {
+                    return (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+                }
+
+                // Priority 1: exact id="js_es" (the known navigation Share element)
+                const byId = document.getElementById('js_es');
+                if (byId && visibleText(byId) === 'Share') {
+                    // click the closest clickable ancestor
+                    let target = byId;
+                    while (target && target !== document.body) {
+                        if (target.getAttribute('role') === 'button' || target.tagName === 'BUTTON') {
+                            target.click(); return 'id=js_es (role parent)';
+                        }
+                        target = target.parentElement;
+                    }
+                    // No role=button ancestor found — click the element itself
+                    byId.click(); return 'id=js_es (direct)';
+                }
+
+                // Priority 2: any visible div whose DIRECT text is exactly "Share"
+                // but is NOT the final aria-busy=false publish button
+                const allDivs = Array.from(document.querySelectorAll('div'));
+                for (const div of allDivs) {
+                    // Skip the final publish button (it already has role="button" + aria-busy)
+                    if (div.getAttribute('role') === 'button' && div.getAttribute('aria-busy') === 'false') continue;
+
+                    const text = (div.innerText || div.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (text === 'Share') {
+                        div.click(); return 'plain div text=Share';
+                    }
+                }
+
+                return null; // not found
+            });
+
+            if (phaseAClicked) {
+                logger.success(`[POST] ✅ Phase A Share clicked (${phaseAClicked})`);
+            } else {
+                // Fallback: click ANY Share element including role=button ones;
+                // phase B will handle the second click if needed.
+                logger.warn('[POST] Phase A: broad scan failed, trying XPath contains...');
+                try {
+                    const [fallbackBtn] = await this.page.$x(`//div[contains(.,'Share')]`);
+                    if (fallbackBtn) {
+                        await fallbackBtn.click();
+                        logger.success('[POST] ✅ Phase A Share clicked (XPath fallback)');
+                    }
+                } catch (e) {
+                    logger.warn(`[POST] Phase A XPath fallback failed: ${e.message}`);
+                }
+            }
+
+            // ── Wait for publish screen to load ───────────────────────────────
+            logger.log('[POST] Phase A done — waiting 4s for publish screen to load...');
+            await this.page.waitForTimeout(4000);
+
+            // ── PHASE B: Final Publish Share button ───────────────────────────
+            // This is the definitive button: role="button" + aria-busy="false"
+            // Structure: div[role=button][aria-busy=false] > span > div > div > div[text=Share]
+
+            logger.log('[POST] clickShare — Phase B: clicking final publish Share button...');
+            let shareClicked = false;
+            let strategy = '';
+
+            // B-Strategy 1: XPath strict — role=button + aria-busy=false + text=Share
+            try {
+                const xpath1 = `//div[@role='button' and @aria-busy='false' and .//div[normalize-space(text())='Share']]`;
+                const [btn1] = await this.page.$x(xpath1);
+                if (btn1) {
+                    await btn1.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+                    await this.page.waitForTimeout(500);
+                    await btn1.hover();
+                    await this.page.waitForTimeout(300);
+                    await btn1.click();
+                    shareClicked = true;
+                    strategy = 'B-XPath (role+aria-busy+text)';
+                    logger.success('[POST] ✅ Phase B Share clicked (B-Strategy 1)');
+                }
+            } catch (e) {
+                logger.warn(`[POST] B-Strategy 1 failed: ${e.message}`);
+            }
+
+            // B-Strategy 2: XPath role=button + text (without aria-busy)
+            if (!shareClicked) {
+                try {
+                    const xpath2 = `//div[@role='button' and .//div[normalize-space(text())='Share']]`;
+                    const [btn2] = await this.page.$x(xpath2);
+                    if (btn2) {
+                        await btn2.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+                        await this.page.waitForTimeout(500);
+                        await btn2.hover();
+                        await this.page.waitForTimeout(300);
+                        await btn2.click();
+                        shareClicked = true;
+                        strategy = 'B-XPath (role+text)';
+                        logger.success('[POST] ✅ Phase B Share clicked (B-Strategy 2)');
+                    }
+                } catch (e) {
+                    logger.warn(`[POST] B-Strategy 2 failed: ${e.message}`);
+                }
+            }
+
+            // B-Strategy 3: page.evaluate — role=button + aria-busy=false + text=Share
+            if (!shareClicked) {
+                shareClicked = await this.page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('div[role="button"]'));
+                    const btn = buttons.find(b => {
+                        const busy = b.getAttribute('aria-busy');
+                        const text = (b.textContent || '').replace(/\s+/g, ' ').trim();
+                        return text === 'Share' && (busy === 'false' || busy === null);
+                    });
+                    if (btn) { btn.click(); return true; }
+                    return false;
+                });
+                if (shareClicked) {
+                    strategy = 'B-evaluate (role+text)';
+                    logger.success('[POST] ✅ Phase B Share clicked (B-Strategy 3)');
+                }
+            }
+
+            // B-Strategy 4: Nuclear engine
+            if (!shareClicked) {
+                try {
+                    await clickElementByText(
+                        this.page,
+                        ['Share', 'Share reel', 'Share post'],
+                        'Share',
+                        { negativeKeywords: ['cancel', 'discard', 'delete', 'remove', 'schedule'] }
+                    );
+                    shareClicked = true;
+                    strategy = 'B-nuclear engine';
+                    logger.success('[POST] ✅ Phase B Share clicked (B-Strategy 4: nuclear)');
+                } catch (e) {
+                    logger.warn(`[POST] B-Strategy 4 failed: ${e.message}`);
+                }
+            }
+
+            if (!shareClicked) {
+                // Phase B might not be needed if Phase A already did the full publish (single-step Reel)
+                logger.warn('[POST] Phase B: no second Share button found — Phase A may have been the final publish step');
+            } else {
+                await this.page.waitForTimeout(2000);
+                logger.success(`[POST] Share completed. Strategy: ${strategy}`);
+            }
+
+        } catch (error) {
+            logger.error(`[POST] Failed in clickShare: ${error.message}`);
+            await this._saveDebugEvidence('share_failed');
+            throw error;
+        }
+    }
+
+    /**
+     * STEP 6 (Post branch) — Click Publish button
      *
      * Uses nuclear engine with scoring to avoid clicking wrong buttons.
      * Falls back to XPath if nuclear engine fails.
